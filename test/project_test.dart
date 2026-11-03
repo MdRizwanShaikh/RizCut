@@ -1,4 +1,7 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rizcut/features/editor/color_grade.dart';
 import 'package:rizcut/features/editor/project.dart';
 
 void main() {
@@ -36,4 +39,33 @@ void main() {
     expect(s.texts.single.text, 'yo');
     expect(s.removeText(0).texts, isEmpty);
   });
+
+  test('transition opacity peaks at the cut', () {
+    final s = p
+        .splitAt(const Duration(seconds: 4))
+        .setTransition(0, TransitionType.fadeBlack);
+    expect(s.transitionAt(const Duration(seconds: 4)).amount, closeTo(1, 1e-6));
+    expect(s.transitionAt(const Duration(seconds: 2)).amount, 0);
+    expect(s.transitionAt(const Duration(milliseconds: 4150)).amount,
+        closeTo(0.5, 1e-6));
+  });
+
+  test('json round trip keeps everything', () {
+    final s = p
+        .splitAt(const Duration(seconds: 4))
+        .setSpeed(1, 2)
+        .setTransition(0, TransitionType.fadeWhite)
+        .addText(const TextOverlay(
+            text: 'hey', start: Duration.zero, end: Duration(seconds: 1)))
+        .copyWith(
+          grade: const ColorGrade(preset: FilterPreset.neon, brightness: 0.1),
+          music: const MusicTrack(location: '/m.mp3', isUrl: false, volume: 0.4),
+          originalVolume: 0.3,
+        );
+    final back = Project.fromJson(
+        jsonDecode(jsonEncode(s.toJson())) as Map<String, Object?>);
+    expect(back.toJson(), s.toJson());
+    expect(back.duration, s.duration);
+  });
 }
+

@@ -4,6 +4,7 @@
 /// (and against a desktop ffmpeg binary).
 library;
 
+import '../../features/editor/color_grade.dart';
 import '../../features/editor/project.dart';
 
 enum ExportResolution {
@@ -103,21 +104,71 @@ class OverlayImage {
   final double centerX, centerY;
 }
 
+/// Colour grade as FFmpeg filters (empty when the grade is identity).
+///
+/// Works in 16-bit RGB. `colorchannelmixer` only accepts coefficients in
+/// -2..2, so stronger matrices are split into `M/k` followed by a `k` gain.
+String gradeFilter(ColorGrade grade) {
+  if (grade.isIdentity) return '';
+  final m = grade.matrix;
+  String f(double v) => v.toStringAsFixed(4);
+  var maxAbs = 0.0;
+  for (final i in const [0, 1, 2, 4, 5, 6, 8, 9, 10]) {
+    if (m[i].abs() > maxAbs) maxAbs = m[i].abs();
+  }
+  final gains = <double>[];
+  var k = 1.0;
+  while (maxAbs / k > 2) {
+    final step = (maxAbs / k / 2) > 2 ? 2.0 : maxAbs / k / 2 * 1.0001;
+    gains.add(step);
+    k *= step;
+  }
+  final mixer = 'colorchannelmixer='
+      'rr=${f(m[0] / k)}:rg=${f(m[1] / k)}:rb=${f(m[2] / k)}:'
+      'gr=${f(m[4] / k)}:gg=${f(m[5] / k)}:gb=${f(m[6] / k)}:'
+      'br=${f(m[8] / k)}:bg=${f(m[9] / k)}:bb=${f(m[10] / k)}';
+  final parts = [
+    'format=rgb48le',
+    mixer,
+    for (final g in gains.reversed)
+      'colorchannelmixer=rr=${f(g)}:gg=${f(g)}:bb=${f(g)}',
+  ];
+  final offs = [m[3], m[7], m[11]];
+  if (offs.any((o) => o.abs() > 1e-4)) {
+    String lut(double o) =>
+        "'clip(val+${o.toStringAsFixed(4)}*maxval,minval,maxval)'";
+    parts.add('lutrgb=r=${lut(offs[0])}:g=${lut(offs[1])}:b=${lut(offs[2])}');
+  }
+  return parts.join(',');
+}
+
+/// Background music input for the export.
+class MusicInput {
+  const MusicInput({required this.path, this.volume = 0.8, this.fade = true});
+  final String path;
+  final double volume;
+  final bool fade;
+}
+
 /// Builds the full export command for a multi-clip [project].
 List<String> buildProjectExportArgs({
   required String input,
   required String output,
-  required List<VideoClip> clips,
+  required Project project,
   required int width,
   required int height,
   required bool hasAudio,
   required ExportSettings settings,
   List<OverlayImage> overlays = const [],
+  MusicInput? music,
   VideoEncoder encoder = VideoEncoder.hardware,
 }) {
+  final clips = project.clips;
   if (clips.isEmpty) throw ArgumentError('project has no clips');
   final graph = <String>[];
   final concatInputs = StringBuffer();
+  final grade = gradeFilter(project.grade);
+  final half = kTransitionHalf.inMicroseconds / 1e6;
 
   for (var i = 0; i < clips.length; i++) {
     final c = clips[i];
@@ -126,14 +177,41 @@ List<String> buildProjectExportArgs({
     }
     final a = ffmpegSeconds(c.sourceIn), b = ffmpegSeconds(c.sourceOut);
     final speed = _num(c.speed);
-    graph.add('[0:v]trim=start=$a:end=$b,'
-        'setpts=(PTS-STARTPTS)/$speed,'
-        'scale=$width:$height,setsar=1,fps=${settings.fps},format=yuv420p'
-        '[v$i]');
+    final len = c.timelineLength.inMicroseconds / 1e6;
+    final d = half < len / 2 ? half : len / 2;
+    final inType = i > 0 ? clips[i - 1].transitionOut : TransitionType.none;
+    final outType = i < clips.length - 1 ? c.transitionOut : TransitionType.none;
+    String color(TransitionType t) =>
+        t == TransitionType.fadeWhite ? 'white' : 'black';
+
+    final v = <String>[
+      'trim=start=$a:end=$b',
+      'setpts=(PTS-STARTPTS)/$speed',
+      'scale=$width:$height',
+      'setsar=1',
+      'fps=${settings.fps}',
+      if (grade.isNotEmpty) grade,
+      if (inType != TransitionType.none)
+        'fade=t=in:st=0:d=${d.toStringAsFixed(3)}:color=${color(inType)}',
+      if (outType != TransitionType.none)
+        'fade=t=out:st=${(len - d).toStringAsFixed(3)}:'
+            'd=${d.toStringAsFixed(3)}:color=${color(outType)}',
+      'format=yuv420p',
+    ];
+    graph.add('[0:v]${v.join(',')}[v$i]');
     concatInputs.write('[v$i]');
     if (hasAudio) {
-      graph.add('[0:a]atrim=start=$a:end=$b,asetpts=PTS-STARTPTS,'
-          '${atempoChain(c.speed)},aresample=44100[a$i]');
+      final au = <String>[
+        'atrim=start=$a:end=$b',
+        'asetpts=PTS-STARTPTS',
+        atempoChain(c.speed),
+        'aresample=44100',
+        if (inType != TransitionType.none)
+          'afade=t=in:st=0:d=${d.toStringAsFixed(3)}',
+        if (outType != TransitionType.none)
+          'afade=t=out:st=${(len - d).toStringAsFixed(3)}:d=${d.toStringAsFixed(3)}',
+      ];
+      graph.add('[0:a]${au.join(',')}[a$i]');
       concatInputs.write('[a$i]');
     }
   }
@@ -152,6 +230,41 @@ List<String> buildProjectExportArgs({
     last = next;
   }
 
+  // Audio: original (with volume) and/or looping background music.
+  final total = project.duration.inMicroseconds / 1e6;
+  final useOriginal = hasAudio && project.originalVolume > 0;
+  String? audioOut;
+  if (useOriginal) {
+    if (project.originalVolume == 1) {
+      audioOut = 'ac';
+    } else {
+      graph.add('[ac]volume=${_num(project.originalVolume)}[ao]');
+      audioOut = 'ao';
+    }
+  }
+  if (music != null) {
+    final idx = overlays.length + 1;
+    final fadeOut = total > 3 ? 1.5 : total / 3;
+    final m = <String>[
+      'aresample=44100',
+      'atrim=0:${total.toStringAsFixed(3)}',
+      'asetpts=PTS-STARTPTS',
+      'volume=${_num(music.volume)}',
+      if (music.fade) ...[
+        'afade=t=in:st=0:d=${fadeOut.toStringAsFixed(3)}',
+        'afade=t=out:st=${(total - fadeOut).toStringAsFixed(3)}:'
+            'd=${fadeOut.toStringAsFixed(3)}',
+      ],
+    ];
+    graph.add('[$idx:a]${m.join(',')}[m]');
+    if (audioOut != null) {
+      graph.add('[$audioOut][m]amix=inputs=2:duration=first:normalize=0[am]');
+      audioOut = 'am';
+    } else {
+      audioOut = 'm';
+    }
+  }
+
   final videoCodecArgs = switch (encoder) {
     VideoEncoder.hardware => [
         '-c:v', encoder.codec,
@@ -167,10 +280,12 @@ List<String> buildProjectExportArgs({
     '-y',
     '-i', input,
     for (final o in overlays) ...['-i', o.path],
+    if (music != null) ...['-stream_loop', '-1', '-i', music.path],
     '-filter_complex', graph.join(';'),
     '-map', '[$last]',
-    if (hasAudio) ...['-map', '[ac]', '-c:a', 'aac', '-b:a', '128k'],
+    if (audioOut != null) ...['-map', '[$audioOut]', '-c:a', 'aac', '-b:a', '128k'],
     ...videoCodecArgs,
+    '-t', total.toStringAsFixed(3),
     '-movflags', '+faststart',
     output,
   ];

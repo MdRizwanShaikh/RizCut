@@ -59,6 +59,11 @@ class _FfmpegExporter implements ProjectExporter {
       ));
     }
 
+    final track = project.music;
+    final music = track == null || track.isUrl
+        ? null
+        : MusicInput(path: track.location, volume: track.volume, fade: track.fade);
+
     final totalMs = project.duration.inMilliseconds;
     String? lastLogs;
     try {
@@ -67,12 +72,13 @@ class _FfmpegExporter implements ProjectExporter {
         final args = buildProjectExportArgs(
           input: input,
           output: output,
-          clips: project.clips,
+          project: project,
           width: out.width,
           height: out.height,
           hasAudio: probe.hasAudio,
           settings: settings,
           overlays: overlays,
+          music: music,
           encoder: encoder,
         );
         final done = Completer<void>();

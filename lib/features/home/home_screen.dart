@@ -3,12 +3,73 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../../core/theme.dart';
+import '../../services/storage/draft_store.dart';
 import '../editor/editor_screen.dart';
 import '../editor/video_source.dart';
 
 /// Guest-mode home: no sign-in wall, straight into editing.
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  List<Draft> _drafts = const [];
+
+  @override
+  void initState() {
+    super.initState();
+    _reload();
+  }
+
+  Future<void> _reload() async {
+    final d = await DraftStore.instance.list();
+    if (mounted) setState(() => _drafts = d);
+  }
+
+  Future<void> _deleteDraft(Draft d) async {
+    final ok = await showModalBottomSheet<bool>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('Delete this draft?',
+                  style: Theme.of(ctx).textTheme.titleLarge),
+              const SizedBox(height: 6),
+              const Text('Your original video stays on the phone.',
+                  style: TextStyle(color: RizColors.textDim)),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.of(ctx).pop(false),
+                    child: const Text('Keep'),
+                  ),
+                  const Spacer(),
+                  FilledButton(
+                    style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFFFF5C7A)),
+                    onPressed: () => Navigator.of(ctx).pop(true),
+                    child: const Text('Delete draft'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (ok == true) {
+      await DraftStore.instance.delete(d.id);
+      _reload();
+    }
+  }
 
   Future<void> _newProject(BuildContext context) async {
     final files = await FilePicker.pickFiles(type: FileType.video);
@@ -20,10 +81,15 @@ class HomeScreen extends StatelessWidget {
     _open(context, source);
   }
 
-  void _open(BuildContext context, VideoSource source) {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => EditorScreen(source: source)),
+  Future<void> _open(BuildContext context, VideoSource source,
+      {Draft? draft}) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+          builder: (_) => EditorScreen(source: source, draft: draft)),
     );
+    // Give the editor's final save a moment, then refresh drafts.
+    await Future<void>.delayed(const Duration(milliseconds: 150));
+    _reload();
   }
 
   @override
@@ -97,28 +163,147 @@ class HomeScreen extends StatelessWidget {
                   children: [
                     _Feature(icon: Icons.content_cut, label: 'Split', color: RizColors.magenta),
                     _Feature(icon: Icons.speed, label: 'Speed', color: RizColors.cyan),
+                    _Feature(icon: Icons.auto_awesome, label: 'Filters', color: RizColors.violet),
+                    _Feature(icon: Icons.music_note, label: 'Music', color: RizColors.blue),
                     _Feature(icon: Icons.text_fields, label: 'Text', color: RizColors.pink),
-                    _Feature(icon: Icons.hd_outlined, label: '1080p', color: RizColors.blue),
                   ],
                 ),
                 const SizedBox(height: 28),
                 Text('Drafts', style: theme.textTheme.titleMedium),
                 const SizedBox(height: 12),
-                Container(
-                  height: 120,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: RizColors.surface.withValues(alpha: 0.7),
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(color: RizColors.outline),
+                if (_drafts.isEmpty)
+                  Container(
+                    height: 120,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: RizColors.surface.withValues(alpha: 0.7),
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(color: RizColors.outline),
+                    ),
+                    child: const Text('No drafts yet',
+                        style: TextStyle(color: RizColors.textDim)),
+                  )
+                else
+                  GridView.count(
+                    crossAxisCount: 2,
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    mainAxisSpacing: 12,
+                    crossAxisSpacing: 12,
+                    childAspectRatio: 1.25,
+                    children: [
+                      for (var i = 0; i < _drafts.length; i++)
+                        _DraftCard(
+                          draft: _drafts[i],
+                          color: RizColors.clipColors[
+                              i % RizColors.clipColors.length],
+                          onTap: () => _open(context, _drafts[i].source,
+                              draft: _drafts[i]),
+                          onDelete: () => _deleteDraft(_drafts[i]),
+                        ),
+                    ],
                   ),
-                  child: const Text('No drafts yet',
-                      style: TextStyle(color: RizColors.textDim)),
-                ),
               ],
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+String _ago(DateTime t) {
+  final d = DateTime.now().difference(t);
+  if (d.inMinutes < 1) return 'just now';
+  if (d.inHours < 1) return '${d.inMinutes} min ago';
+  if (d.inDays < 1) return '${d.inHours} h ago';
+  return '${d.inDays} d ago';
+}
+
+class _DraftCard extends StatelessWidget {
+  const _DraftCard({
+    required this.draft,
+    required this.color,
+    required this.onTap,
+    required this.onDelete,
+  });
+
+  final Draft draft;
+  final Color color;
+  final VoidCallback onTap, onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = draft.project;
+    final secs = p.duration.inMilliseconds / 1000;
+    final name = draft.source.name.isEmpty ? 'Untitled' : draft.source.name;
+    return Material(
+      color: RizColors.surface,
+      borderRadius: BorderRadius.circular(18),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        onLongPress: onDelete,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [color, color.withValues(alpha: 0.35)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                ),
+                child: Stack(
+                  children: [
+                    const Center(
+                      child: Icon(Icons.movie_filter_outlined,
+                          color: Colors.white70, size: 34),
+                    ),
+                    Positioned(
+                      right: 8,
+                      bottom: 6,
+                      child: Text('${secs.toStringAsFixed(1)}s',
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700)),
+                    ),
+                    Positioned(
+                      right: 0,
+                      top: 0,
+                      child: IconButton(
+                        tooltip: 'Delete draft',
+                        visualDensity: VisualDensity.compact,
+                        onPressed: onDelete,
+                        icon: const Icon(Icons.more_horiz,
+                            color: Colors.white),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w600)),
+                  Text(
+                    '${p.clips.length} clip${p.clips.length == 1 ? '' : 's'} · ${_ago(draft.updatedAt)}',
+                    style: const TextStyle(
+                        color: RizColors.textDim, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

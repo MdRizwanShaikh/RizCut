@@ -14,6 +14,11 @@ Full roadmap: [docs/PLAN.md](docs/PLAN.md)
 - Multi-clip timeline with centre playhead and scrubbing
 - Split, delete, per-clip speed (0.25x–4x), undo/redo
 - Text overlays: colour, size, background box, drag to position
+- Filters: 8 presets + brightness / contrast / saturation (one colour matrix
+  shared by preview and export)
+- Transitions between clips: fade through black, flash white
+- Audio: original sound volume/mute, background music (loops, fade in/out)
+- Drafts auto-save on the device (no login) and reopen from Home
 - Export 480p / 720p / 1080p at 30/60 fps → gallery + share
 
 ## Web preview

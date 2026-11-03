@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rizcut/features/editor/color_grade.dart';
 import 'package:rizcut/features/editor/project.dart';
 import 'package:rizcut/services/ffmpeg/export_command.dart';
 
@@ -15,7 +16,7 @@ void main() {
     final args = buildProjectExportArgs(
       input: '/in.mp4',
       output: '/out.mp4',
-      clips: clips,
+      project: const Project(clips: clips),
       width: 720,
       height: 1280,
       hasAudio: true,
@@ -47,7 +48,7 @@ void main() {
     final args = buildProjectExportArgs(
       input: 'a',
       output: 'b',
-      clips: clips,
+      project: const Project(clips: clips),
       width: 640,
       height: 360,
       hasAudio: false,
@@ -74,4 +75,64 @@ void main() {
     expect(outputSize(640, 360, 1080), (width: 640, height: 360));
     expect(displaySize(1920, 1080, -90), (width: 1080, height: 1920));
   });
+
+  test('grade, transitions and music are in the graph', () {
+    final project = const Project(
+      clips: [
+        VideoClip(
+          sourceIn: Duration.zero,
+          sourceOut: Duration(seconds: 2),
+          transitionOut: TransitionType.fadeWhite,
+        ),
+        VideoClip(sourceIn: Duration(seconds: 2), sourceOut: Duration(seconds: 4)),
+      ],
+      grade: ColorGrade(preset: FilterPreset.warm),
+      originalVolume: 0.5,
+    );
+    final args = buildProjectExportArgs(
+      input: 'in.mp4',
+      output: 'out.mp4',
+      project: project,
+      width: 640,
+      height: 360,
+      hasAudio: true,
+      settings: const ExportSettings(),
+      music: const MusicInput(path: 'm.mp3', volume: 0.6),
+    );
+    final graph = args[args.indexOf('-filter_complex') + 1];
+    expect(graph, contains('colorchannelmixer=rr=1.0800'));
+    expect(graph, contains("lutrgb=r='clip(val+0.0150*maxval,minval,maxval)'"));
+    expect(graph, contains('fade=t=out:st=1.700:d=0.300:color=white'));
+    expect(graph, contains('fade=t=in:st=0:d=0.300:color=white'));
+    expect(graph, contains('[ac]volume=0.5[ao]'));
+    expect(graph, contains('[1:a]aresample=44100,atrim=0:4.000'));
+    expect(graph, contains('[ao][m]amix=inputs=2:duration=first:normalize=0[am]'));
+    expect(args, containsAllInOrder(['-stream_loop', '-1', '-i', 'm.mp3']));
+    expect(args, containsAllInOrder(['-map', '[am]']));
+    expect(args, containsAllInOrder(['-t', '4.000']));
+  });
+
+  test('muted original with no music has no audio map', () {
+    final args = buildProjectExportArgs(
+      input: 'a',
+      output: 'b',
+      project: const Project(clips: clips, originalVolume: 0),
+      width: 640,
+      height: 360,
+      hasAudio: true,
+      settings: const ExportSettings(),
+    );
+    expect(args, isNot(contains('-c:a')));
+  });
+
+  test('strong grades are split to keep mixer coefficients in -2..2', () {
+    final g = gradeFilter(const ColorGrade(
+        preset: FilterPreset.neon, saturation: 2, contrast: 1.5));
+    final coeffs = RegExp(r'(?:rr|rg|rb|gr|gg|gb|br|bg|bb)=(-?[0-9.]+)')
+        .allMatches(g)
+        .map((m) => double.parse(m.group(1)!));
+    expect(coeffs.every((c) => c.abs() <= 2), isTrue);
+    expect('colorchannelmixer'.allMatches(g).length, greaterThan(1));
+  });
 }
+

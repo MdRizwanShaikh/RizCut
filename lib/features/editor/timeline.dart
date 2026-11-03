@@ -89,16 +89,29 @@ class _TimelineState extends State<Timeline> {
                     const SizedBox(height: 6),
                     _Ruler(duration: p.duration, pxPerSecond: pxPerSecond),
                     const SizedBox(height: 6),
-                    Row(
+                    Stack(
+                      clipBehavior: Clip.none,
                       children: [
-                        for (var i = 0; i < p.clips.length; i++)
-                          _ClipTile(
-                            clip: p.clips[i],
-                            width: _px(p.clips[i].timelineLength),
-                            color: RizColors.clipColors[
-                                i % RizColors.clipColors.length],
-                            active: i == widget.activeClip,
-                          ),
+                        Row(
+                          children: [
+                            for (var i = 0; i < p.clips.length; i++)
+                              _ClipTile(
+                                clip: p.clips[i],
+                                width: _px(p.clips[i].timelineLength),
+                                color: RizColors.clipColors[
+                                    i % RizColors.clipColors.length],
+                                active: i == widget.activeClip,
+                              ),
+                          ],
+                        ),
+                        for (var i = 0; i < p.clips.length - 1; i++)
+                          if (p.clips[i].transitionOut != TransitionType.none)
+                            Positioned(
+                              left: _px(p.clipStart(i + 1)) - 12,
+                              top: 14,
+                              child: _TransitionBadge(
+                                  type: p.clips[i].transitionOut),
+                            ),
                       ],
                     ),
                     const SizedBox(height: 6),
@@ -287,6 +300,27 @@ class _TextBar extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _TransitionBadge extends StatelessWidget {
+  const _TransitionBadge({required this.type});
+  final TransitionType type;
+
+  @override
+  Widget build(BuildContext context) {
+    final white = type == TransitionType.fadeWhite;
+    return Container(
+      width: 24,
+      height: 24,
+      decoration: BoxDecoration(
+        color: white ? Colors.white : RizColors.bg,
+        shape: BoxShape.circle,
+        border: Border.all(color: const Color(0xFF7DF9C2), width: 2),
+      ),
+      child: Icon(Icons.blur_on,
+          size: 14, color: white ? RizColors.bg : const Color(0xFF7DF9C2)),
     );
   }
 }
