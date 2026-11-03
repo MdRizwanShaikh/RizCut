@@ -77,6 +77,7 @@ class TextOverlay {
     this.position = const Offset(0.5, 0.8),
     this.sizeFraction = 0.07,
     this.background = false,
+    this.sticker,
   });
 
   final String text;
@@ -90,6 +91,11 @@ class TextOverlay {
   final double sizeFraction;
   final bool background;
 
+  /// Index into `kStickers` when this overlay is a sticker instead of text.
+  final int? sticker;
+
+  bool get isSticker => sticker != null;
+
   bool visibleAt(Duration t) => t >= start && t < end;
 
   TextOverlay copyWith({
@@ -100,6 +106,7 @@ class TextOverlay {
     Offset? position,
     double? sizeFraction,
     bool? background,
+    int? sticker,
   }) =>
       TextOverlay(
         text: text ?? this.text,
@@ -109,10 +116,12 @@ class TextOverlay {
         position: position ?? this.position,
         sizeFraction: sizeFraction ?? this.sizeFraction,
         background: background ?? this.background,
+        sticker: sticker ?? this.sticker,
       );
 
   Map<String, Object?> toJson() => {
         'text': text,
+        if (sticker != null) 'sticker': sticker,
         'start': start.inMicroseconds,
         'end': end.inMicroseconds,
         'color': color.toARGB32(),
@@ -133,6 +142,7 @@ class TextOverlay {
         ),
         sizeFraction: (j['size'] as num?)?.toDouble() ?? 0.07,
         background: j['bg'] as bool? ?? false,
+        sticker: (j['sticker'] as num?)?.toInt(),
       );
 }
 

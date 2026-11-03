@@ -67,5 +67,21 @@ void main() {
     expect(back.toJson(), s.toJson());
     expect(back.duration, s.duration);
   });
+
+  test('trim clamps to a minimum clip length', () {
+    final s = p.trimClip(0, const Duration(seconds: 2), const Duration(seconds: 6));
+    expect(s.duration, const Duration(seconds: 4));
+    expect(identical(p.trimClip(0, Duration.zero, const Duration(milliseconds: 50)), p),
+        isTrue);
+  });
+
+  test('stickers survive json', () {
+    const t = TextOverlay(
+        text: '', sticker: 3, start: Duration.zero, end: Duration(seconds: 1));
+    final back = Project.fromJson(
+        jsonDecode(jsonEncode(p.addText(t).toJson())) as Map<String, Object?>);
+    expect(back.texts.single.isSticker, isTrue);
+    expect(back.texts.single.sticker, 3);
+  });
 }
 

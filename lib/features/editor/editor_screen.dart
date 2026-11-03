@@ -9,7 +9,10 @@ import '../../services/storage/draft_store.dart';
 import '../export/export_sheet.dart';
 import 'audio_sheet.dart';
 import 'filter_sheet.dart';
+import 'arrange_sheet.dart';
+import 'overlay_style.dart';
 import 'project.dart';
+import 'sticker_sheet.dart';
 import 'text_editor_sheet.dart';
 import 'timeline.dart';
 import 'video_source.dart';
@@ -51,6 +54,15 @@ class _EditorScreenState extends State<EditorScreen> {
   int? _selectedText;
   bool _playing = false;
   String? _error;
+
+  /// Timeline zoom (pixels per second).
+  double _pps = 64;
+  static const _minPps = 12.0, _maxPps = 320.0;
+
+  // Trim drag state.
+  Project? _trimBase;
+  int _trimIndex = 0;
+  TrimEdge _trimEdge = TrimEdge.start;
 
   Project get p => _project!;
 
@@ -382,7 +394,107 @@ class _EditorScreenState extends State<EditorScreen> {
     ));
   }
 
+  // ---------- trim / zoom / arrange / stickers ----------
+
+  void _zoom(double factor) =>
+      setState(() => _pps = (_pps * factor).clamp(_minPps, _maxPps));
+
+  void _tapClip(int i) {
+    if (_playing) _pause();
+    setState(() => _selectedText = null);
+    _seek(p.clipStart(i));
+  }
+
+  void _trimStart(int i, TrimEdge edge) {
+    _pause();
+    _trimBase = p;
+    _trimIndex = i;
+    _trimEdge = edge;
+  }
+
+  void _trimUpdate(double dxSeconds) {
+    final base = _trimBase;
+    if (base == null) return;
+    final c = base.clips[_trimIndex];
+    final delta =
+        Duration(microseconds: (dxSeconds * 1e6 * c.speed).round());
+    final src = _c.value.duration;
+    Duration clampD(Duration v, Duration lo, Duration hi) =>
+        v < lo ? lo : (v > hi ? hi : v);
+    final next = _trimEdge == TrimEdge.start
+        ? base.trimClip(_trimIndex,
+            clampD(c.sourceIn + delta, Duration.zero, c.sourceOut - Project.minClip),
+            c.sourceOut)
+        : base.trimClip(_trimIndex, c.sourceIn,
+            clampD(c.sourceOut + delta, c.sourceIn + Project.minClip, src));
+    final nc = next.clips[_trimIndex];
+    setState(() {
+      _project = next;
+      _clip = _trimIndex;
+      _t = _trimEdge == TrimEdge.start
+          ? next.clipStart(_trimIndex)
+          : next.clipStart(_trimIndex) + nc.timelineLength -
+              const Duration(milliseconds: 1);
+    });
+    _c.seekTo(_trimEdge == TrimEdge.start ? nc.sourceIn : nc.sourceOut);
+  }
+
+  void _trimEnd() {
+    final base = _trimBase;
+    _trimBase = null;
+    if (base == null || identical(base, p)) return;
+    final edited = p;
+    _project = base;
+    _apply(edited);
+  }
+
+  Future<void> _arrange() async {
+    _pause();
+    if (p.clips.length < 2) {
+      _toast('Split the video first to get clips to arrange');
+      return;
+    }
+    final order = await showModalBottomSheet<List<int>>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => ArrangeSheet(project: p),
+    );
+    if (order == null) return;
+    final unchanged = [for (var i = 0; i < order.length; i++) i];
+    if (order.join(',') == unchanged.join(',')) return;
+    _apply(p.copyWith(clips: [for (final i in order) p.clips[i]]));
+  }
+
+  Future<void> _stickers([int? index]) async {
+    _pause();
+    final existing = index == null ? null : p.texts[index];
+    final picked = await showModalBottomSheet<StickerChoice>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => StickerSheet(
+        initialColor: existing?.color,
+      ),
+    );
+    if (picked == null) return;
+    if (existing != null && index != null) {
+      _apply(p.updateText(
+          index, existing.copyWith(sticker: picked.index, color: picked.color)));
+      return;
+    }
+    _apply(p.addText(TextOverlay(
+      text: '',
+      sticker: picked.index,
+      color: picked.color,
+      start: _t,
+      end: _minDur(_t + const Duration(seconds: 3), p.duration),
+      position: const Offset(0.5, 0.4),
+      sizeFraction: 0.08,
+    )));
+    setState(() => _selectedText = p.texts.length - 1);
+  }
+
   Future<void> _addOrEditText([int? index]) async {
+    if (index != null && p.texts[index].isSticker) return _stickers(index);
     _pause();
     final existing = index == null ? null : p.texts[index];
     final result = await showModalBottomSheet<TextOverlay>(
@@ -485,11 +597,17 @@ class _EditorScreenState extends State<EditorScreen> {
                       activeClip: _activeClip,
                       selectedText: _selectedText,
                       playing: _playing,
+                      pxPerSecond: _pps,
                       onScrub: (t) {
                         if (_playing) _pause();
                         _seek(t);
                       },
                       onTapText: (i) => setState(() => _selectedText = i),
+                      onTapClip: _tapClip,
+                      onLongPressClip: (_) => _arrange(),
+                      onTrimStart: _trimStart,
+                      onTrimUpdate: _trimUpdate,
+                      onTrimEnd: _trimEnd,
                     ),
                     _toolbar(),
                   ],
@@ -604,8 +722,16 @@ class _EditorScreenState extends State<EditorScreen> {
               padding: EdgeInsets.only(right: 6),
               child: Icon(Icons.auto_awesome, size: 16, color: RizColors.pink),
             ),
-          Text('${p.clips.length} clip${p.clips.length == 1 ? '' : 's'}',
-              style: const TextStyle(color: RizColors.textDim)),
+          _ZoomButton(
+            icon: Icons.zoom_out,
+            tooltip: 'Zoom out timeline',
+            onTap: _pps > _minPps ? () => _zoom(1 / 1.5) : null,
+          ),
+          _ZoomButton(
+            icon: Icons.zoom_in,
+            tooltip: 'Zoom in timeline',
+            onTap: _pps < _maxPps ? () => _zoom(1.5) : null,
+          ),
         ],
       ),
     );
@@ -632,10 +758,14 @@ class _EditorScreenState extends State<EditorScreen> {
               _Tool(icon: Icons.music_note, label: 'Audio', color: RizColors.blue, onTap: _audio),
               _Tool(
                 icon: textSelected ? Icons.edit : Icons.text_fields,
-                label: textSelected ? 'Edit text' : 'Text',
+                label: textSelected
+                  ? (p.texts[_selectedText!].isSticker ? 'Edit sticker' : 'Edit text')
+                  : 'Text',
                 color: RizColors.pink,
                 onTap: () => _addOrEditText(_selectedText),
               ),
+              _Tool(icon: Icons.emoji_emotions_outlined, label: 'Stickers', color: const Color(0xFFFFD54F), onTap: () => _stickers()),
+              _Tool(icon: Icons.view_week_outlined, label: 'Arrange', color: RizColors.textDim, onTap: _arrange),
               _Tool(icon: Icons.blur_on, label: 'Transition', color: const Color(0xFF7DF9C2), onTap: _transition),
               _Tool(icon: Icons.delete_outline, label: 'Delete', color: const Color(0xFFFF5C7A), onTap: _delete),
             ],
@@ -648,6 +778,23 @@ class _EditorScreenState extends State<EditorScreen> {
 
 Duration _minDur(Duration a, Duration b) => a < b ? a : b;
 Duration _maxDur(Duration a, Duration b) => a > b ? a : b;
+
+class _ZoomButton extends StatelessWidget {
+  const _ZoomButton({required this.icon, required this.tooltip, this.onTap});
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      tooltip: tooltip,
+      visualDensity: VisualDensity.compact,
+      onPressed: onTap,
+      icon: Icon(icon, size: 20, color: RizColors.textDim),
+    );
+  }
+}
 
 class _TransitionSheet extends StatelessWidget {
   const _TransitionSheet({required this.current, required this.cutNumber});
@@ -783,25 +930,9 @@ class _TextOnPreview extends StatelessWidget {
                     ? Border.all(color: RizColors.cyan, width: 1.5)
                     : null,
               ),
-              child: Text(
-                overlay.text,
+              child: Text.rich(
+                overlaySpan(overlay, fontSize),
                 textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: overlay.color,
-                  fontFamily: 'Inter',
-                  fontSize: fontSize,
-                  fontWeight: FontWeight.w800,
-                  height: 1.15,
-                  shadows: overlay.background
-                      ? null
-                      : [
-                          Shadow(
-                            color: const Color(0xAA000000),
-                            blurRadius: fontSize * 0.15,
-                            offset: Offset(0, fontSize * 0.05),
-                          ),
-                        ],
-                ),
               ),
             ),
           ),

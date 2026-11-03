@@ -10,6 +10,7 @@ import 'package:gal/gal.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../../features/editor/overlay_style.dart';
 import '../../features/editor/project.dart';
 import 'export_command.dart';
 import 'project_exporter.dart';
@@ -46,7 +47,7 @@ class _FfmpegExporter implements ProjectExporter {
     final temp = <File>[];
     for (var i = 0; i < project.texts.length; i++) {
       final t = project.texts[i];
-      if (t.text.trim().isEmpty) continue;
+      if (!t.isSticker && t.text.trim().isEmpty) continue;
       final file = File('${dir.path}/rz_text_${stamp}_$i.png');
       await file.writeAsBytes(await renderTextPng(t, out.height.toDouble()));
       temp.add(file);
@@ -174,24 +175,7 @@ class _FfmpegExporter implements ProjectExporter {
 Future<List<int>> renderTextPng(TextOverlay t, double frameHeight) async {
   final fontSize = t.sizeFraction * frameHeight;
   final painter = TextPainter(
-    text: TextSpan(
-      text: t.text,
-      style: TextStyle(
-        color: t.color,
-        fontFamily: 'Inter',
-        fontSize: fontSize,
-        fontWeight: FontWeight.w800,
-        shadows: t.background
-            ? null
-            : [
-                Shadow(
-                  color: const Color(0xAA000000),
-                  blurRadius: fontSize * 0.15,
-                  offset: Offset(0, fontSize * 0.05),
-                ),
-              ],
-      ),
-    ),
+    text: overlaySpan(t, fontSize),
     textAlign: TextAlign.center,
     textDirection: TextDirection.ltr,
   )..layout();

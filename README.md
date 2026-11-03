@@ -13,6 +13,8 @@ Full roadmap: [docs/PLAN.md](docs/PLAN.md)
 - Import video (guest mode, no login)
 - Multi-clip timeline with centre playhead and scrubbing
 - Split, delete, per-clip speed (0.25x–4x), undo/redo
+- Trim handles on the selected clip, timeline zoom, arrange clips (drag to reorder)
+- Stickers (built-in icon set, any colour), positioned and timed like text
 - Text overlays: colour, size, background box, drag to position
 - Filters: 8 presets + brightness / contrast / saturation (one colour matrix
   shared by preview and export)

@@ -2,8 +2,12 @@ import 'package:flutter/material.dart';
 
 import '../../core/theme.dart';
 import 'project.dart';
+import 'stickers.dart';
 
-/// Horizontal timeline with a fixed centre playhead. Dragging scrubs.
+enum TrimEdge { start, end }
+
+/// Horizontal timeline with a fixed centre playhead. Dragging scrubs; the
+/// active clip shows trim handles on both edges.
 class Timeline extends StatefulWidget {
   const Timeline({
     super.key,
@@ -12,8 +16,14 @@ class Timeline extends StatefulWidget {
     required this.activeClip,
     required this.selectedText,
     required this.playing,
+    required this.pxPerSecond,
     required this.onScrub,
     required this.onTapText,
+    required this.onTapClip,
+    required this.onLongPressClip,
+    required this.onTrimStart,
+    required this.onTrimUpdate,
+    required this.onTrimEnd,
   });
 
   final Project project;
@@ -21,28 +31,40 @@ class Timeline extends StatefulWidget {
   final int activeClip;
   final int? selectedText;
   final bool playing;
+
+  /// Zoom: horizontal pixels per second of output time.
+  final double pxPerSecond;
   final ValueChanged<Duration> onScrub;
   final ValueChanged<int> onTapText;
+  final ValueChanged<int> onTapClip;
+  final ValueChanged<int> onLongPressClip;
+  final void Function(int clip, TrimEdge edge) onTrimStart;
+
+  /// [dxSeconds] is the total drag distance since start, in output seconds.
+  final void Function(double dxSeconds) onTrimUpdate;
+  final VoidCallback onTrimEnd;
 
   @override
   State<Timeline> createState() => _TimelineState();
 }
 
 class _TimelineState extends State<Timeline> {
-  static const double pxPerSecond = 64;
   final _scroll = ScrollController();
   bool _userDragging = false;
+  bool _trimming = false;
+  double _trimDx = 0;
 
-  double _px(Duration d) => d.inMicroseconds / 1e6 * pxPerSecond;
+  double get pps => widget.pxPerSecond;
+  double _px(Duration d) => d.inMicroseconds / 1e6 * pps;
 
   @override
   void didUpdateWidget(Timeline old) {
     super.didUpdateWidget(old);
-    if (!_userDragging) {
+    if (!_userDragging && !_trimming) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (_scroll.hasClients && !_userDragging) {
-          final target = _px(widget.position)
-              .clamp(0.0, _scroll.position.maxScrollExtent);
+        if (_scroll.hasClients && !_userDragging && !_trimming) {
+          final target =
+              _px(widget.position).clamp(0.0, _scroll.position.maxScrollExtent);
           if ((target - _scroll.offset).abs() > 0.5) _scroll.jumpTo(target);
         }
       });
@@ -56,15 +78,56 @@ class _TimelineState extends State<Timeline> {
   }
 
   bool _onScroll(ScrollNotification n) {
+    if (_trimming) return false;
     if (n is ScrollStartNotification && n.dragDetails != null) {
       _userDragging = true;
     } else if (n is ScrollUpdateNotification && _userDragging) {
-      widget.onScrub(Duration(
-          microseconds: (_scroll.offset / pxPerSecond * 1e6).round()));
+      widget.onScrub(
+          Duration(microseconds: (_scroll.offset / pps * 1e6).round()));
     } else if (n is ScrollEndNotification) {
       _userDragging = false;
     }
     return false;
+  }
+
+  Widget _handle(int clip, TrimEdge edge) {
+    return GestureDetector(
+      key: Key('trim-${edge.name}-$clip'),
+      behavior: HitTestBehavior.opaque,
+      onHorizontalDragStart: (_) {
+        _trimming = true;
+        _trimDx = 0;
+        widget.onTrimStart(clip, edge);
+      },
+      onHorizontalDragUpdate: (d) {
+        _trimDx += d.delta.dx;
+        widget.onTrimUpdate(_trimDx / pps);
+      },
+      onHorizontalDragEnd: (_) {
+        _trimming = false;
+        widget.onTrimEnd();
+      },
+      onHorizontalDragCancel: () {
+        _trimming = false;
+        widget.onTrimEnd();
+      },
+      child: Container(
+        width: 18,
+        height: 52,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.horizontal(
+            left: Radius.circular(edge == TrimEdge.start ? 10 : 0),
+            right: Radius.circular(edge == TrimEdge.end ? 10 : 0),
+          ),
+        ),
+        child: Icon(
+          edge == TrimEdge.start ? Icons.chevron_left : Icons.chevron_right,
+          size: 18,
+          color: RizColors.bg,
+        ),
+      ),
+    );
   }
 
   @override
@@ -74,6 +137,9 @@ class _TimelineState extends State<Timeline> {
       height: 132,
       child: LayoutBuilder(builder: (context, box) {
         final half = box.maxWidth / 2;
+        final active = widget.activeClip.clamp(0, p.clips.length - 1);
+        final activeLeft = _px(p.clipStart(active));
+        final activeWidth = _px(p.clips[active].timelineLength);
         return Stack(
           children: [
             NotificationListener<ScrollNotification>(
@@ -87,7 +153,7 @@ class _TimelineState extends State<Timeline> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const SizedBox(height: 6),
-                    _Ruler(duration: p.duration, pxPerSecond: pxPerSecond),
+                    _Ruler(duration: p.duration, pxPerSecond: pps),
                     const SizedBox(height: 6),
                     Stack(
                       clipBehavior: Clip.none,
@@ -95,12 +161,16 @@ class _TimelineState extends State<Timeline> {
                         Row(
                           children: [
                             for (var i = 0; i < p.clips.length; i++)
-                              _ClipTile(
-                                clip: p.clips[i],
-                                width: _px(p.clips[i].timelineLength),
-                                color: RizColors.clipColors[
-                                    i % RizColors.clipColors.length],
-                                active: i == widget.activeClip,
+                              GestureDetector(
+                                onTap: () => widget.onTapClip(i),
+                                onLongPress: () => widget.onLongPressClip(i),
+                                child: _ClipTile(
+                                  clip: p.clips[i],
+                                  width: _px(p.clips[i].timelineLength),
+                                  color: RizColors.clipColors[
+                                      i % RizColors.clipColors.length],
+                                  active: i == active,
+                                ),
                               ),
                           ],
                         ),
@@ -112,6 +182,21 @@ class _TimelineState extends State<Timeline> {
                               child: _TransitionBadge(
                                   type: p.clips[i].transitionOut),
                             ),
+                        if (!widget.playing) ...[
+                          // Handles sit inside the clip's bounds so they
+                          // receive touches (Stack doesn't hit-test overflow).
+                          Positioned(
+                            left: activeLeft,
+                            top: 0,
+                            child: _handle(active, TrimEdge.start),
+                          ),
+                          Positioned(
+                            left: (activeLeft + activeWidth - 20)
+                                .clamp(activeLeft + 18, double.infinity),
+                            top: 0,
+                            child: _handle(active, TrimEdge.end),
+                          ),
+                        ],
                       ],
                     ),
                     const SizedBox(height: 6),
@@ -128,7 +213,7 @@ class _TimelineState extends State<Timeline> {
                               top: 0,
                               bottom: 0,
                               child: _TextBar(
-                                text: p.texts[i].text,
+                                overlay: p.texts[i],
                                 selected: i == widget.selectedText,
                                 onTap: () => widget.onTapText(i),
                               ),
@@ -175,16 +260,25 @@ class _Ruler extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final secs = (duration.inMilliseconds / 1000).ceil();
+    // Keep labels roughly 60px apart whatever the zoom.
+    final step = pxPerSecond >= 120
+        ? 1
+        : pxPerSecond >= 60
+            ? 2
+            : pxPerSecond >= 30
+                ? 5
+                : 10;
+    final dot = pxPerSecond >= 40 ? 1 : step;
     return SizedBox(
       height: 14,
       width: duration.inMicroseconds / 1e6 * pxPerSecond,
       child: Stack(
         children: [
-          for (var s = 0; s <= secs; s += 1)
+          for (var s = 0; s <= secs; s += dot)
             Positioned(
               left: s * pxPerSecond,
               child: Text(
-                s % 2 == 0 ? '${s}s' : '·',
+                s % step == 0 ? '${s}s' : '·',
                 style: const TextStyle(fontSize: 10, color: RizColors.textDim),
               ),
             ),
@@ -264,34 +358,36 @@ class _ClipTile extends StatelessWidget {
 
 class _TextBar extends StatelessWidget {
   const _TextBar({
-    required this.text,
+    required this.overlay,
     required this.selected,
     required this.onTap,
   });
 
-  final String text;
+  final TextOverlay overlay;
   final bool selected;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
+    final icon = stickerIcon(overlay.sticker);
+    final color = icon != null ? RizColors.cyan : RizColors.pink;
     return GestureDetector(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 6),
         alignment: Alignment.centerLeft,
         decoration: BoxDecoration(
-          color: RizColors.pink.withValues(alpha: selected ? 0.9 : 0.35),
+          color: color.withValues(alpha: selected ? 0.9 : 0.35),
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: RizColors.pink),
+          border: Border.all(color: color),
         ),
         child: Row(
           children: [
-            const Icon(Icons.text_fields, size: 14, color: Colors.white),
+            Icon(icon ?? Icons.text_fields, size: 14, color: Colors.white),
             const SizedBox(width: 4),
             Expanded(
               child: Text(
-                text,
+                icon != null ? 'Sticker' : overlay.text,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(color: Colors.white, fontSize: 12),
