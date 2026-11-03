@@ -4,6 +4,7 @@
 /// (and against a desktop ffmpeg binary).
 library;
 
+import '../../features/editor/clip_look.dart';
 import '../../features/editor/color_grade.dart';
 import '../../features/editor/media.dart';
 import '../../features/editor/project.dart';
@@ -175,6 +176,40 @@ class ExportMedia {
       : (width: even(shortSide.toDouble()), height: even(shortSide / a));
 }
 
+/// Static framing for a clip: crop (zoom + pan), flips, then rotation —
+/// the same order the preview applies them.
+List<String> lookFilters(ClipLook look) {
+  String f(double v) => v.toStringAsFixed(4);
+  return [
+    if (look.zoom > 1.0001)
+      'crop=iw/${f(look.zoom)}:ih/${f(look.zoom)}:'
+          '(iw-ow)*${f((look.panX + 1) / 2)}:(ih-oh)*${f((look.panY + 1) / 2)}',
+    if (look.flipH) 'hflip',
+    if (look.flipV) 'vflip',
+    if (look.turns == 1) 'transpose=1',
+    if (look.turns == 2) ...['hflip', 'vflip'],
+    if (look.turns == 3) 'transpose=2',
+  ];
+}
+
+/// Ken Burns motion over the whole canvas frame with `zoompan`.
+/// [frames] is the clip length in frames.
+String? motionFilter(Motion motion, int w, int h, int fps, int frames) {
+  if (motion == Motion.none) return null;
+  final n = frames <= 1 ? 1 : frames - 1;
+  final k = (kMotionZoom - 1).toStringAsFixed(4);
+  final kz = kMotionZoom.toStringAsFixed(4);
+  const cx = '(iw-iw/zoom)/2', cy = '(ih-ih/zoom)/2';
+  final (z, x, y) = switch (motion) {
+    Motion.zoomIn => ("1+$k*on/$n", cx, cy),
+    Motion.zoomOut => ("$kz-$k*on/$n", cx, cy),
+    Motion.panLeft => (kz, '(iw-iw/zoom)*(1-on/$n)', cy),
+    Motion.panRight => (kz, '(iw-iw/zoom)*on/$n', cy),
+    Motion.none => ('1', '0', '0'),
+  };
+  return "zoompan=z='$z':x='$x':y='$y':d=1:s=${w}x$h:fps=$fps";
+}
+
 /// Fits a clip into the W x H canvas over a blurred copy or a solid colour.
 List<String> _fitToCanvas(
     String inLabel, String outLabel, int w, int h, BackgroundMode bg) {
@@ -244,9 +279,14 @@ List<String> buildProjectExportArgs({
     String color(TransitionType t) =>
         t == TransitionType.fadeWhite ? 'white' : 'black';
 
-    graph.add('[$i:v]setpts=(PTS-STARTPTS)/$speed,fps=$fps,format=yuv420p[r$i]');
+    final look = lookFilters(c.look);
+    graph.add('[$i:v]setpts=(PTS-STARTPTS)/$speed,fps=$fps,'
+        '${look.isEmpty ? '' : '${look.join(',')},'}format=yuv420p[r$i]');
     graph.addAll(_fitToCanvas('r$i', 'c$i', width, height, project.background));
+    final motion = motionFilter(
+        c.look.motion, width, height, fps, (len * fps).round());
     final v = <String>[
+      ?motion,
       if (grade.isNotEmpty) grade,
       if (inType != TransitionType.none)
         'fade=t=in:st=0:d=${d.toStringAsFixed(3)}:color=${color(inType)}',

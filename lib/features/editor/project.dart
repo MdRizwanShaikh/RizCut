@@ -1,5 +1,6 @@
 import 'dart:ui' show Color, Offset;
 
+import 'clip_look.dart';
 import 'color_grade.dart';
 import 'media.dart';
 
@@ -28,6 +29,7 @@ class VideoClip {
     required this.sourceOut,
     this.speed = 1,
     this.transitionOut = TransitionType.none,
+    this.look = const ClipLook(),
   }) : assert(speed > 0);
 
   /// Which [MediaItem] this clip shows.
@@ -37,6 +39,9 @@ class VideoClip {
   final Duration sourceIn, sourceOut;
   final double speed;
   final TransitionType transitionOut;
+
+  /// Rotate / flip / zoom / motion for this clip.
+  final ClipLook look;
 
   Duration get sourceLength => sourceOut - sourceIn;
 
@@ -49,6 +54,7 @@ class VideoClip {
     Duration? sourceOut,
     double? speed,
     TransitionType? transitionOut,
+    ClipLook? look,
   }) =>
       VideoClip(
         mediaId: mediaId,
@@ -56,9 +62,11 @@ class VideoClip {
         sourceOut: sourceOut ?? this.sourceOut,
         speed: speed ?? this.speed,
         transitionOut: transitionOut ?? this.transitionOut,
+        look: look ?? this.look,
       );
 
   Map<String, Object?> toJson() => {
+        if (!look.isIdentity) 'look': look.toJson(),
         'media': mediaId,
         'in': sourceIn.inMicroseconds,
         'out': sourceOut.inMicroseconds,
@@ -73,6 +81,9 @@ class VideoClip {
         speed: (j['speed'] as num?)?.toDouble() ?? 1,
         transitionOut: TransitionType.values.asNameMap()[j['tr']] ??
             TransitionType.none,
+        look: j['look'] == null
+            ? const ClipLook()
+            : ClipLook.fromJson((j['look'] as Map).cast()),
       );
 }
 
@@ -362,6 +373,9 @@ class Project {
 
   Project setSpeed(int index, double speed) =>
       copyWith(clips: [...clips]..[index] = clips[index].copyWith(speed: speed));
+
+  Project setLook(int index, ClipLook look) =>
+      copyWith(clips: [...clips]..[index] = clips[index].copyWith(look: look));
 
   Project setTransition(int index, TransitionType type) => copyWith(
       clips: [...clips]..[index] = clips[index].copyWith(transitionOut: type));

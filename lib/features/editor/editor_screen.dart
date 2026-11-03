@@ -11,6 +11,8 @@ import '../../services/storage/draft_store.dart';
 import '../export/export_sheet.dart';
 import 'audio_sheet.dart';
 import 'canvas_sheet.dart';
+import 'clip_look.dart';
+import 'look_sheet.dart';
 import 'filter_sheet.dart';
 import '../../services/thumbs/thumbnailer.dart';
 import 'image_provider.dart';
@@ -146,7 +148,17 @@ class _EditorScreenState extends State<EditorScreen> {
   Future<Project> _loadPlayers(Project project) async {
     var next = project;
     for (final m in project.media) {
-      if (m.isImage || _players.containsKey(m.id)) continue;
+      if (m.isImage) {
+        if (m.width == null) {
+          final size = await _imageSize(m);
+          if (size != null) {
+            next = next.updateMedia(
+                m.copyWith(width: size.width.round(), height: size.height.round()));
+          }
+        }
+        continue;
+      }
+      if (_players.containsKey(m.id)) continue;
       var c = await m.source.createController();
       try {
         await c.initialize();
@@ -172,6 +184,23 @@ class _EditorScreenState extends State<EditorScreen> {
       ));
     }
     return next;
+  }
+
+  Future<Size?> _imageSize(MediaItem m) async {
+    final done = Completer<Size?>();
+    final stream = imageFor(m.source).resolve(ImageConfiguration.empty);
+    late final ImageStreamListener l;
+    l = ImageStreamListener((info, _) {
+      if (!done.isCompleted) {
+        done.complete(Size(info.image.width.toDouble(), info.image.height.toDouble()));
+      }
+      stream.removeListener(l);
+    }, onError: (_, _) {
+      if (!done.isCompleted) done.complete(null);
+      stream.removeListener(l);
+    });
+    stream.addListener(l);
+    return done.future.timeout(const Duration(seconds: 8), onTimeout: () => null);
   }
 
   @override
@@ -521,6 +550,27 @@ class _EditorScreenState extends State<EditorScreen> {
       case 'video':
         await _appendMedia(
             [(const VideoSource.url('demo.mp4', name: 'Demo'), MediaKind.video)]);
+    }
+  }
+
+  Future<void> _editLook() async {
+    _pause();
+    final index = _activeClip;
+    final before = p;
+    final ok = await showModalBottomSheet<bool>(
+      context: context,
+      barrierColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => LookSheet(
+        initial: p.clips[index].look,
+        isPhoto: p.mediaFor(p.clips[index])?.isImage ?? false,
+        onChanged: (look) => setState(() => _project = p.setLook(index, look)),
+      ),
+    );
+    final edited = p;
+    setState(() => _project = before);
+    if (ok == true && !identical(edited.clips[index].look, before.clips[index].look)) {
+      _apply(edited);
     }
   }
 
@@ -895,8 +945,18 @@ class _EditorScreenState extends State<EditorScreen> {
             return Stack(
               clipBehavior: Clip.hardEdge,
               children: [
-                Positioned.fill(child: _background(clip)),
-                Positioned.fill(child: _graded(clip, _media(clip, BoxFit.contain))),
+                Positioned.fill(
+                  child: _withMotion(
+                    clip,
+                    Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        _background(clip),
+                        _graded(clip, _media(clip, BoxFit.contain)),
+                      ],
+                    ),
+                  ),
+                ),
                 if (tr.amount > 0)
                   Positioned.fill(
                     child: IgnorePointer(
@@ -945,32 +1005,66 @@ class _EditorScreenState extends State<EditorScreen> {
   }
 
   /// The clip's video or photo, fitted with [fit].
+  /// The clip's video or photo with its framing (crop/flip/rotate),
+  /// fitted into the parent with [fit].
   Widget _media(VideoClip clip, BoxFit fit) {
     final player = _players[clip.mediaId];
-    if (player != null && player.value.isInitialized) {
-      final size = player.value.size;
-      return FittedBox(
-        fit: fit,
-        clipBehavior: Clip.hardEdge,
-        child: SizedBox(
-          width: size.width,
-          height: size.height,
-          child: VideoPlayer(player),
-        ),
-      );
-    }
     final m = p.mediaFor(clip);
-    if (m != null && m.isImage) {
-      return Image(
+    Size? size;
+    Widget? raw;
+    if (player != null && player.value.isInitialized) {
+      size = player.value.size;
+      raw = VideoPlayer(player);
+    } else if (m != null && m.isImage) {
+      size = m.width != null && m.height != null
+          ? Size(m.width!.toDouble(), m.height!.toDouble())
+          : null;
+      raw = Image(
         image: imageFor(m.source),
-        fit: fit,
+        fit: BoxFit.fill,
         gaplessPlayback: true,
         errorBuilder: (_, _, _) => const Center(
           child: Icon(Icons.broken_image_outlined, color: RizColors.textDim),
         ),
       );
+      if (size == null) {
+        // Size not known yet: show the photo without framing.
+        return Image(image: imageFor(m.source), fit: fit, gaplessPlayback: true);
+      }
     }
-    return const SizedBox.shrink();
+    if (raw == null || size == null) return const SizedBox.shrink();
+    final look = clip.look;
+    Widget child = SizedBox(width: size.width, height: size.height, child: raw);
+    if (look.zoom > 1.0001) {
+      child = ClipRect(
+        child: Transform.scale(
+          scale: look.zoom,
+          alignment: Alignment(look.panX, look.panY),
+          child: child,
+        ),
+      );
+    }
+    if (look.flipH || look.flipV) {
+      child = Transform.flip(flipX: look.flipH, flipY: look.flipV, child: child);
+    }
+    if (look.turns != 0) child = RotatedBox(quarterTurns: look.turns, child: child);
+    return FittedBox(fit: fit, clipBehavior: Clip.hardEdge, child: child);
+  }
+
+  /// Wraps the clip layer in its Ken Burns motion at the current time.
+  Widget _withMotion(VideoClip clip, Widget child) {
+    if (clip.look.motion == Motion.none) return child;
+    final start = p.clipStart(_clip.clamp(0, p.clips.length - 1));
+    final len = clip.timelineLength.inMicroseconds;
+    final progress = len == 0 ? 0.0 : (_t - start).inMicroseconds / len;
+    final mo = clip.look.motionAt(progress);
+    return ClipRect(
+      child: Transform.scale(
+        scale: mo.scale,
+        alignment: Alignment(mo.alignX, mo.alignY),
+        child: child,
+      ),
+    );
   }
 
   /// Applies the colour grade where Flutter can (web videos use CSS).
@@ -1065,6 +1159,7 @@ class _EditorScreenState extends State<EditorScreen> {
             children: [
               _Tool(icon: Icons.add_photo_alternate_outlined, label: 'Add', color: RizColors.cyan, onTap: _addMediaSheet),
               _Tool(icon: Icons.aspect_ratio, label: 'Canvas', color: const Color(0xFFFFB36B), onTap: _canvas),
+              _Tool(icon: Icons.crop_rotate, label: 'Edit', color: const Color(0xFF9DFF6B), onTap: _editLook),
               _Tool(icon: Icons.content_cut, label: 'Split', color: RizColors.magenta, onTap: _split),
               _Tool(icon: Icons.speed, label: 'Speed', color: RizColors.cyan, onTap: _speed),
               _Tool(icon: Icons.auto_awesome, label: 'Filters', color: RizColors.violet, onTap: _filters),
