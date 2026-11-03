@@ -12,6 +12,7 @@ import '../export/export_sheet.dart';
 import 'audio_sheet.dart';
 import 'canvas_sheet.dart';
 import 'filter_sheet.dart';
+import '../../services/thumbs/thumbnailer.dart';
 import 'image_provider.dart';
 import 'media.dart';
 import 'arrange_sheet.dart';
@@ -63,6 +64,10 @@ class _EditorScreenState extends State<EditorScreen> {
   late final String _draftId = widget.draft?.id ?? DraftStore.newId();
   Timer? _saveTimer;
   bool _dirty = false;
+
+  /// Video frame thumbnails by "mediaId@ms".
+  final _thumbs = <String, ImageProvider>{};
+  final _thumbsPending = <String>{};
 
   /// Drives playback through photo clips.
   Timer? _photoTimer;
@@ -200,11 +205,36 @@ class _EditorScreenState extends State<EditorScreen> {
       }
     }
     _syncMusicSource();
+    _loadThumbs();
     if (save) {
       _dirty = true;
       _saveTimer?.cancel();
       _saveTimer = Timer(const Duration(milliseconds: 800), _saveNow);
     }
+  }
+
+  String _thumbKey(VideoClip c) => '${c.mediaId}@${c.sourceIn.inMilliseconds}';
+
+  /// Requests frame thumbnails for video clips that don't have one yet.
+  void _loadThumbs() {
+    if (_project == null) return;
+    for (final c in p.clips) {
+      final m = p.mediaFor(c);
+      if (m == null || m.isImage || (m.source.isUrl && !kIsWeb)) continue;
+      final key = _thumbKey(c);
+      if (_thumbs.containsKey(key) || !_thumbsPending.add(key)) continue;
+      videoThumbnail(m.source.location, c.sourceIn).then((img) {
+        _thumbsPending.remove(key);
+        if (img != null && mounted) setState(() => _thumbs[key] = img);
+      });
+    }
+  }
+
+  ImageProvider? _thumbFor(VideoClip c) {
+    final m = p.mediaFor(c);
+    if (m == null) return null;
+    if (m.isImage) return ResizeImage(imageFor(m.source), height: 96);
+    return _thumbs[_thumbKey(c)];
   }
 
   void _saveNow() {
@@ -832,6 +862,7 @@ class _EditorScreenState extends State<EditorScreen> {
                       onTrimStart: _trimStart,
                       onTrimUpdate: _trimUpdate,
                       onTrimEnd: _trimEnd,
+                      thumbFor: _thumbFor,
                     ),
                     _toolbar(),
                   ],

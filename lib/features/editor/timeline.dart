@@ -24,6 +24,7 @@ class Timeline extends StatefulWidget {
     required this.onTrimStart,
     required this.onTrimUpdate,
     required this.onTrimEnd,
+    this.thumbFor,
   });
 
   final Project project;
@@ -43,6 +44,9 @@ class Timeline extends StatefulWidget {
   /// [dxSeconds] is the total drag distance since start, in output seconds.
   final void Function(double dxSeconds) onTrimUpdate;
   final VoidCallback onTrimEnd;
+
+  /// Filmstrip image for a clip (video frame or the photo itself).
+  final ImageProvider? Function(VideoClip clip)? thumbFor;
 
   @override
   State<Timeline> createState() => _TimelineState();
@@ -166,6 +170,7 @@ class _TimelineState extends State<Timeline> {
                                 onLongPress: () => widget.onLongPressClip(i),
                                 child: _ClipTile(
                                   clip: p.clips[i],
+                                  thumb: widget.thumbFor?.call(p.clips[i]),
                                   width: _px(p.clips[i].timelineLength),
                                   color: RizColors.clipColors[
                                       i % RizColors.clipColors.length],
@@ -291,12 +296,14 @@ class _Ruler extends StatelessWidget {
 class _ClipTile extends StatelessWidget {
   const _ClipTile({
     required this.clip,
+    this.thumb,
     required this.width,
     required this.color,
     required this.active,
   });
 
   final VideoClip clip;
+  final ImageProvider? thumb;
   final double width;
   final Color color;
   final bool active;
@@ -312,11 +319,32 @@ class _ClipTile extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 8),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(10),
-        gradient: LinearGradient(
-          colors: [color, color.withValues(alpha: 0.55)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
+        color: color,
+        image: thumb == null
+            ? null
+            : DecorationImage(
+                image: thumb!,
+                fit: BoxFit.fitHeight,
+                repeat: ImageRepeat.repeatX,
+                alignment: Alignment.centerLeft,
+              ),
+        gradient: thumb != null
+            ? null
+            : LinearGradient(
+                colors: [color, color.withValues(alpha: 0.55)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+      ),
+      foregroundDecoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(10),
+        gradient: thumb == null
+            ? null
+            : LinearGradient(
+                colors: [color.withValues(alpha: 0.55), Colors.transparent],
+                begin: Alignment.bottomLeft,
+                end: Alignment.topRight,
+              ),
         border: Border.all(
           color: active ? Colors.white : Colors.transparent,
           width: 2,
