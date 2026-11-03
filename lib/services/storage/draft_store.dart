@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../features/editor/media.dart';
 import '../../features/editor/project.dart';
 import '../../features/editor/video_source.dart';
 
@@ -29,10 +30,18 @@ class Draft {
   factory Draft.fromJson(Map<String, Object?> j) => Draft(
         id: j['id'] as String,
         source: VideoSource.fromJson((j['source'] as Map).cast()),
-        project: Project.fromJson((j['project'] as Map).cast()),
+        project: Project.fromJson(
+          (j['project'] as Map).cast(),
+          fallback: _legacyMedia((j['source'] as Map).cast()),
+        ),
         updatedAt:
             DateTime.fromMillisecondsSinceEpoch((j['updated'] as num).toInt()),
       );
+}
+
+MediaItem _legacyMedia(Map<String, Object?> source) {
+  final s = VideoSource.fromJson(source);
+  return MediaItem(id: 'm0', source: s, kind: mediaKindFor(s.name.isEmpty ? s.location : s.name));
 }
 
 /// Drafts live only on this device (no login, no server).

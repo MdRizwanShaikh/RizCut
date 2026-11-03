@@ -12,7 +12,6 @@ class _UnsupportedExporter implements ProjectExporter {
 
   @override
   Future<String> export({
-    required String input,
     required Project project,
     required Size previewSize,
     required ExportSettings settings,

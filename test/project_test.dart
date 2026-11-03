@@ -2,7 +2,9 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rizcut/features/editor/color_grade.dart';
+import 'package:rizcut/features/editor/media.dart';
 import 'package:rizcut/features/editor/project.dart';
+import 'package:rizcut/features/editor/video_source.dart';
 
 void main() {
   final p = Project.single(const Duration(seconds: 10));
@@ -82,6 +84,34 @@ void main() {
         jsonDecode(jsonEncode(p.addText(t).toJson())) as Map<String, Object?>);
     expect(back.texts.single.isSticker, isTrue);
     expect(back.texts.single.sticker, 3);
+  });
+
+  test('addMedia appends clips; v1 drafts migrate to media m0', () {
+    final photo = MediaItem(
+        id: 'ph', source: const VideoSource.url('a.jpg'), kind: MediaKind.image);
+    final s = p.addMedia([photo]);
+    expect(s.clips.last.mediaId, 'ph');
+    expect(s.clips.last.timelineLength, kDefaultPhotoLength);
+    final legacy = Project.fromJson(
+      {'clips': [{'in': 0, 'out': 1000000}]},
+      fallback: const MediaItem(
+          id: 'm0', source: VideoSource.file('/v.mp4'), kind: MediaKind.video),
+    );
+    expect(legacy.mediaFor(legacy.clips.single)?.source.location, '/v.mp4');
+  });
+
+  test('canvas aspect follows the ratio or the first sized media', () {
+    const m = MediaItem(
+        id: 'm0', source: VideoSource.file('/v.mp4'), kind: MediaKind.video,
+        width: 1920, height: 1080);
+    final s = Project.fromMedia(m);
+    expect(s.canvasAspect(), closeTo(16 / 9, 1e-9));
+    expect(s.copyWith(canvas: CanvasRatio.portrait).canvasAspect(), closeTo(9 / 16, 1e-9));
+  });
+
+  test('media kind from file name', () {
+    expect(mediaKindFor('IMG_1.JPG'), MediaKind.image);
+    expect(mediaKindFor('clip.mp4'), MediaKind.video);
   });
 }
 

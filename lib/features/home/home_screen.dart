@@ -72,20 +72,23 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _newProject(BuildContext context) async {
-    final files = await FilePicker.pickFiles(type: FileType.video);
+    final files = await FilePicker.pickFiles(type: FileType.media);
     if (files.isEmpty || !context.mounted) return;
-    final f = files.first;
-    final source = f.path != null
-        ? VideoSource.file(f.path!, name: f.name)
-        : VideoSource.url(f.uri.toString(), name: f.name);
-    _open(context, source);
+    final sources = [
+      for (final f in files)
+        f.path != null
+            ? VideoSource.file(f.path!, name: f.name)
+            : VideoSource.url(f.uri.toString(), name: f.name),
+    ];
+    _open(context, sources.first, extra: sources.skip(1).toList());
   }
 
   Future<void> _open(BuildContext context, VideoSource source,
-      {Draft? draft}) async {
+      {Draft? draft, List<VideoSource> extra = const []}) async {
     await Navigator.of(context).push(
       MaterialPageRoute(
-          builder: (_) => EditorScreen(source: source, draft: draft)),
+          builder: (_) =>
+              EditorScreen(source: source, draft: draft, extra: extra)),
     );
     // Give the editor's final save a moment, then refresh drafts.
     await Future<void>.delayed(const Duration(milliseconds: 150));

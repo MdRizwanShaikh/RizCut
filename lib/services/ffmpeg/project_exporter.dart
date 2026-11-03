@@ -10,7 +10,8 @@ class ExportFailed implements Exception {
   ExportFailed(this.logs);
   final String logs;
   @override
-  String toString() => 'Export failed';
+  String toString() =>
+      logs.isNotEmpty && logs.length < 160 ? logs : 'Export failed';
 }
 
 /// Renders a [Project] to an mp4 on-device. On web (preview build) export is
@@ -23,7 +24,6 @@ abstract class ProjectExporter {
   /// [previewSize] is the decoded video size, used if probing fails.
   /// [onProgress] receives 0.0–1.0.
   Future<String> export({
-    required String input,
     required Project project,
     required Size previewSize,
     required ExportSettings settings,

@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:ui' show ImageFilter;
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
@@ -8,7 +10,10 @@ import '../../core/theme.dart';
 import '../../services/storage/draft_store.dart';
 import '../export/export_sheet.dart';
 import 'audio_sheet.dart';
+import 'canvas_sheet.dart';
 import 'filter_sheet.dart';
+import 'image_provider.dart';
+import 'media.dart';
 import 'arrange_sheet.dart';
 import 'overlay_style.dart';
 import 'project.dart';
@@ -26,8 +31,16 @@ String formatDuration(Duration d) {
 }
 
 class EditorScreen extends StatefulWidget {
-  const EditorScreen({super.key, required this.source, this.draft});
+  const EditorScreen({
+    super.key,
+    required this.source,
+    this.draft,
+    this.extra = const [],
+  });
   final VideoSource source;
+
+  /// More files picked together with [source]; appended as clips.
+  final List<VideoSource> extra;
 
   /// When reopening a saved draft.
   final Draft? draft;
@@ -37,8 +50,11 @@ class EditorScreen extends StatefulWidget {
 }
 
 class _EditorScreenState extends State<EditorScreen> {
-  VideoPlayerController? _ctrl;
-  VideoPlayerController get _c => _ctrl!;
+  /// One player per video media item (photos need none).
+  final _players = <String, VideoPlayerController>{};
+
+  /// Player of the clip under the playhead (null on a photo clip).
+  VideoPlayerController? _active;
   VideoPlayerController? _music;
   String? _musicLoc;
   Project? _project;
@@ -47,6 +63,10 @@ class _EditorScreenState extends State<EditorScreen> {
   late final String _draftId = widget.draft?.id ?? DraftStore.newId();
   Timer? _saveTimer;
   bool _dirty = false;
+
+  /// Drives playback through photo clips.
+  Timer? _photoTimer;
+  DateTime _photoTick = DateTime.now();
 
   /// Current position on the output timeline.
   Duration _t = Duration.zero;
@@ -66,6 +86,15 @@ class _EditorScreenState extends State<EditorScreen> {
 
   Project get p => _project!;
 
+  /// Size used to shape the export when the canvas is "Original".
+  Size get _previewSize {
+    for (final c in p.clips) {
+      final pl = _players[c.mediaId];
+      if (pl != null && pl.value.isInitialized) return pl.value.size;
+    }
+    return const Size(1080, 1920);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -74,38 +103,81 @@ class _EditorScreenState extends State<EditorScreen> {
 
   Future<void> _open() async {
     try {
-      final c = await widget.source.createController();
-      if (!mounted) {
-        await c.dispose();
-        return;
+      var project = widget.draft?.project;
+      if (project == null) {
+        final kind = mediaKindFor(
+            widget.source.name.isEmpty ? widget.source.location : widget.source.name);
+        project = Project.fromMedia(MediaItem(
+          id: DraftStore.newId(),
+          source: widget.source,
+          kind: kind,
+        ));
       }
-      _ctrl = c;
-      try {
-        await c.initialize();
-      } catch (_) {
-        final direct = widget.source.directController();
-        if (direct == null) rethrow;
-        await c.dispose();
-        _ctrl = direct;
-        await direct.initialize();
-      }
+      project = await _loadPlayers(project);
       if (!mounted) return;
-      final c2 = _ctrl!;
-      setState(() => _project =
-          widget.draft?.project ?? Project.single(c2.value.duration));
-      c2.addListener(_onTick);
+      // A brand-new video project: the single clip spans the whole file.
+      if (widget.draft == null && !project.media.first.isImage) {
+        project = project.copyWith(
+            clips: [Project.clipFor(project.media.first)]);
+      }
+      setState(() => _project = project);
+      _enterClip(0, p.clips.first.sourceIn);
       _projectChanged(save: widget.draft == null);
+      if (widget.extra.isNotEmpty) {
+        await _appendMedia(
+          [for (final s in widget.extra) (s, mediaKindFor(s.name.isEmpty ? s.location : s.name))],
+          quiet: true,
+        );
+        _undo.clear();
+        _seek(Duration.zero);
+      }
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
     }
   }
 
+  /// Creates players for any video media that doesn't have one yet and
+  /// records their duration/size in the project.
+  Future<Project> _loadPlayers(Project project) async {
+    var next = project;
+    for (final m in project.media) {
+      if (m.isImage || _players.containsKey(m.id)) continue;
+      var c = await m.source.createController();
+      try {
+        await c.initialize();
+      } catch (_) {
+        final direct = m.source.directController();
+        if (direct == null) rethrow;
+        await c.dispose();
+        c = direct;
+        await c.initialize();
+      }
+      if (!mounted) {
+        await c.dispose();
+        return next;
+      }
+      c.addListener(_onTick);
+      await c.setVolume(project.originalVolume);
+      _players[m.id] = c;
+      final size = c.value.size;
+      next = next.updateMedia(m.copyWith(
+        duration: c.value.duration,
+        width: size.width.round(),
+        height: size.height.round(),
+      ));
+    }
+    return next;
+  }
+
   @override
   void dispose() {
     _saveTimer?.cancel();
+    _photoTimer?.cancel();
     if (_dirty) _saveNow();
-    _ctrl?.removeListener(_onTick);
-    _ctrl?.dispose();
+    for (final c in _players.values) {
+      c.removeListener(_onTick);
+      c.dispose();
+    }
     _music?.dispose();
     applyWebVideoFilter(null);
     super.dispose();
@@ -114,7 +186,9 @@ class _EditorScreenState extends State<EditorScreen> {
   // ---------- persistence & side effects ----------
 
   void _projectChanged({bool save = true}) {
-    _c.setVolume(p.originalVolume);
+    for (final c in _players.values) {
+      c.setVolume(p.originalVolume);
+    }
     if (kIsWeb) {
       // The <video> element is attached asynchronously, so apply a few times.
       for (final ms in const [0, 300, 1000, 2500]) {
@@ -188,18 +262,23 @@ class _EditorScreenState extends State<EditorScreen> {
 
   // ---------- playback across clips ----------
 
+  void _advance() {
+    if (_clip + 1 < p.clips.length) {
+      _enterClip(_clip + 1, p.clips[_clip + 1].sourceIn, play: true);
+    } else {
+      _pause();
+      _seek(Duration.zero);
+    }
+  }
+
   void _onTick() {
-    if (!_playing || _project == null) return;
+    final c = _active;
+    if (!_playing || _project == null || c == null) return;
     final clip = p.clips[_clip];
-    final pos = _c.value.position;
+    final pos = c.value.position;
     if (pos >= clip.sourceOut - const Duration(milliseconds: 30) ||
-        (!_c.value.isPlaying && _c.value.isCompleted)) {
-      if (_clip + 1 < p.clips.length) {
-        _enterClip(_clip + 1, p.clips[_clip + 1].sourceIn, play: true);
-      } else {
-        _pause();
-        _seek(Duration.zero);
-      }
+        (!c.value.isPlaying && c.value.isCompleted)) {
+      _advance();
       return;
     }
     final off = pos - clip.sourceIn;
@@ -209,12 +288,43 @@ class _EditorScreenState extends State<EditorScreen> {
     });
   }
 
+  void _onPhotoTick(Timer _) {
+    if (!_playing || _project == null || _active != null) return;
+    final now = DateTime.now();
+    final dt = now.difference(_photoTick);
+    _photoTick = now;
+    final end = p.clipStart(_clip) + p.clips[_clip].timelineLength;
+    final next = _t + dt;
+    if (next >= end - const Duration(milliseconds: 20)) {
+      setState(() => _t = end);
+      _advance();
+    } else {
+      setState(() => _t = next);
+    }
+  }
+
   Future<void> _enterClip(int index, Duration sourcePos,
       {bool play = false}) async {
+    final clip = p.clips[index];
+    final player = _players[clip.mediaId];
+    if (!identical(player, _active)) {
+      await _active?.pause();
+      setState(() => _active = player);
+    }
     _clip = index;
-    await _c.setPlaybackSpeed(p.clips[index].speed);
-    await _c.seekTo(sourcePos);
-    if (play) await _c.play();
+    if (player == null) {
+      // Photo clip: a timer moves the playhead.
+      _photoTimer?.cancel();
+      if (play) {
+        _photoTick = DateTime.now();
+        _photoTimer = Timer.periodic(const Duration(milliseconds: 33), _onPhotoTick);
+      }
+      return;
+    }
+    _photoTimer?.cancel();
+    await player.setPlaybackSpeed(clip.speed);
+    await player.seekTo(sourcePos);
+    if (play && _playing) await player.play();
   }
 
   void _seek(Duration t) {
@@ -238,7 +348,8 @@ class _EditorScreenState extends State<EditorScreen> {
   }
 
   void _pause() {
-    _c.pause();
+    _active?.pause();
+    _photoTimer?.cancel();
     _music?.pause();
     setState(() => _playing = false);
   }
@@ -305,9 +416,113 @@ class _EditorScreenState extends State<EditorScreen> {
     _apply(p.deleteClip(_activeClip));
   }
 
+  Future<void> _addMedia() async {
+    _pause();
+    final files = await FilePicker.pickFiles(type: FileType.media);
+    if (files.isEmpty || !mounted) return;
+    await _appendMedia([
+      for (final f in files)
+        (
+          f.path != null
+              ? VideoSource.file(f.path!, name: f.name)
+              : VideoSource.url(f.uri.toString(), name: f.name),
+          mediaKindFor(f.name),
+        ),
+    ]);
+  }
+
+  Future<void> _appendMedia(List<(VideoSource, MediaKind)> picked,
+      {bool quiet = false}) async {
+    final items = [
+      for (final (src, kind) in picked)
+        MediaItem(id: DraftStore.newId() + src.name.hashCode.toString(),
+            source: src, kind: kind),
+    ];
+    try {
+      final loaded = await _loadPlayers(p.copyWith(media: [...p.media, ...items]));
+      if (!mounted) return;
+      final fresh = [for (final m in items) loaded.mediaById(m.id)!];
+      final end = p.duration;
+      _apply(loaded.copyWith(
+        clips: [...p.clips, for (final m in fresh) Project.clipFor(m)],
+      ));
+      _seek(end);
+      if (!quiet) _toast('Added ${fresh.length} item${fresh.length == 1 ? '' : 's'}');
+    } catch (e) {
+      if (mounted) _toast('Could not open that file');
+    }
+  }
+
+  Future<void> _addMediaSheet() async {
+    if (!kIsWeb) return _addMedia();
+    _pause();
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.perm_media_outlined, color: RizColors.cyan),
+              title: const Text('Videos or photos from device'),
+              onTap: () => Navigator.of(ctx).pop('device'),
+            ),
+            ListTile(
+              key: const Key('add-demo-photo'),
+              leading: const Icon(Icons.image_outlined, color: RizColors.pink),
+              title: const Text('Demo photo'),
+              onTap: () => Navigator.of(ctx).pop('photo'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.movie_outlined, color: RizColors.violet),
+              title: const Text('Demo video'),
+              onTap: () => Navigator.of(ctx).pop('video'),
+            ),
+          ],
+        ),
+      ),
+    );
+    switch (choice) {
+      case 'device':
+        await _addMedia();
+      case 'photo':
+        await _appendMedia(
+            [(const VideoSource.url('demo_photo.jpg', name: 'Demo photo'), MediaKind.image)]);
+      case 'video':
+        await _appendMedia(
+            [(const VideoSource.url('demo.mp4', name: 'Demo'), MediaKind.video)]);
+    }
+  }
+
+  Future<void> _canvas() async {
+    _pause();
+    final before = p;
+    final ok = await showModalBottomSheet<bool>(
+      context: context,
+      barrierColor: Colors.transparent,
+      builder: (_) => CanvasSheet(
+        ratio: p.canvas,
+        background: p.background,
+        onChanged: (r, b) =>
+            setState(() => _project = p.copyWith(canvas: r, background: b)),
+      ),
+    );
+    final edited = p;
+    setState(() => _project = before);
+    if (ok == true &&
+        (edited.canvas != before.canvas ||
+            edited.background != before.background)) {
+      _apply(edited);
+    }
+  }
+
   Future<void> _speed() async {
     _pause();
     final index = _activeClip;
+    if (p.mediaFor(p.clips[index])?.isImage ?? false) {
+      _toast('Drag the clip edge to change how long a photo shows');
+      return;
+    }
     final current = p.clips[index].speed;
     final picked = await showModalBottomSheet<double>(
       context: context,
@@ -418,7 +633,10 @@ class _EditorScreenState extends State<EditorScreen> {
     final c = base.clips[_trimIndex];
     final delta =
         Duration(microseconds: (dxSeconds * 1e6 * c.speed).round());
-    final src = _c.value.duration;
+    final media = base.mediaFor(c);
+    final src = media == null || media.isImage
+        ? kMaxPhotoLength
+        : (_players[c.mediaId]?.value.duration ?? media.duration);
     Duration clampD(Duration v, Duration lo, Duration hi) =>
         v < lo ? lo : (v > hi ? hi : v);
     final next = _trimEdge == TrimEdge.start
@@ -436,7 +654,8 @@ class _EditorScreenState extends State<EditorScreen> {
           : next.clipStart(_trimIndex) + nc.timelineLength -
               const Duration(milliseconds: 1);
     });
-    _c.seekTo(_trimEdge == TrimEdge.start ? nc.sourceIn : nc.sourceOut);
+    _players[c.mediaId]
+        ?.seekTo(_trimEdge == TrimEdge.start ? nc.sourceIn : nc.sourceOut);
   }
 
   void _trimEnd() {
@@ -526,7 +745,12 @@ class _EditorScreenState extends State<EditorScreen> {
 
   void _toast(String msg) => ScaffoldMessenger.of(context)
     ..hideCurrentSnackBar()
-    ..showSnackBar(SnackBar(content: Text(msg)));
+    ..showSnackBar(SnackBar(
+      content: Text(msg),
+      duration: const Duration(seconds: 2),
+      // Float above the toolbar so tools stay tappable.
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 120),
+    ));
 
   void _openExport() {
     _pause();
@@ -538,7 +762,7 @@ class _EditorScreenState extends State<EditorScreen> {
       builder: (_) => ExportSheet(
         source: widget.source,
         project: p,
-        previewSize: _c.value.size,
+        previewSize: _previewSize,
       ),
     );
   }
@@ -621,13 +845,7 @@ class _EditorScreenState extends State<EditorScreen> {
         if (p.texts[i].visibleAt(_t) || i == _selectedText) i,
     ];
     final tr = p.transitionAt(_t);
-    Widget video = VideoPlayer(_c);
-    if (!kIsWeb && !p.grade.isIdentity) {
-      video = ColorFiltered(
-        colorFilter: ColorFilter.matrix(p.grade.flutterMatrix),
-        child: video,
-      );
-    }
+    final clip = p.clips[_clip.clamp(0, p.clips.length - 1)];
     return GestureDetector(
       onTap: () {
         if (_selectedText != null) {
@@ -640,12 +858,14 @@ class _EditorScreenState extends State<EditorScreen> {
         color: Colors.black,
         alignment: Alignment.center,
         child: AspectRatio(
-          aspectRatio: _c.value.aspectRatio,
+          aspectRatio: p.canvasAspect(
+              fallback: _previewSize.width / _previewSize.height),
           child: LayoutBuilder(builder: (context, box) {
             return Stack(
               clipBehavior: Clip.hardEdge,
               children: [
-                Positioned.fill(child: video),
+                Positioned.fill(child: _background(clip)),
+                Positioned.fill(child: _graded(clip, _media(clip, BoxFit.contain))),
                 if (tr.amount > 0)
                   Positioned.fill(
                     child: IgnorePointer(
@@ -690,6 +910,66 @@ class _EditorScreenState extends State<EditorScreen> {
           }),
         ),
       ),
+    );
+  }
+
+  /// The clip's video or photo, fitted with [fit].
+  Widget _media(VideoClip clip, BoxFit fit) {
+    final player = _players[clip.mediaId];
+    if (player != null && player.value.isInitialized) {
+      final size = player.value.size;
+      return FittedBox(
+        fit: fit,
+        clipBehavior: Clip.hardEdge,
+        child: SizedBox(
+          width: size.width,
+          height: size.height,
+          child: VideoPlayer(player),
+        ),
+      );
+    }
+    final m = p.mediaFor(clip);
+    if (m != null && m.isImage) {
+      return Image(
+        image: imageFor(m.source),
+        fit: fit,
+        gaplessPlayback: true,
+        errorBuilder: (_, _, _) => const Center(
+          child: Icon(Icons.broken_image_outlined, color: RizColors.textDim),
+        ),
+      );
+    }
+    return const SizedBox.shrink();
+  }
+
+  /// Applies the colour grade where Flutter can (web videos use CSS).
+  Widget _graded(VideoClip clip, Widget child) {
+    final isVideo = _players.containsKey(clip.mediaId);
+    if (p.grade.isIdentity || (kIsWeb && isVideo)) return child;
+    return ColorFiltered(
+      colorFilter: ColorFilter.matrix(p.grade.flutterMatrix),
+      child: child,
+    );
+  }
+
+  Widget _background(VideoClip clip) {
+    final argb = p.background.argb;
+    if (argb != null) return ColoredBox(color: Color(argb));
+    final isVideo = _players.containsKey(clip.mediaId);
+    if (kIsWeb && isVideo) {
+      // A web <video> can't be drawn twice or blurred; use a soft glow.
+      return const DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: RadialGradient(
+            colors: [Color(0xFF3A1D6E), Color(0xFF0B0620)],
+            radius: 0.9,
+          ),
+        ),
+      );
+    }
+    return ImageFiltered(
+      imageFilter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+      child: _graded(clip, _media(clip, BoxFit.cover)),
     );
   }
 
@@ -752,6 +1032,8 @@ class _EditorScreenState extends State<EditorScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 6),
           child: Row(
             children: [
+              _Tool(icon: Icons.add_photo_alternate_outlined, label: 'Add', color: RizColors.cyan, onTap: _addMediaSheet),
+              _Tool(icon: Icons.aspect_ratio, label: 'Canvas', color: const Color(0xFFFFB36B), onTap: _canvas),
               _Tool(icon: Icons.content_cut, label: 'Split', color: RizColors.magenta, onTap: _split),
               _Tool(icon: Icons.speed, label: 'Speed', color: RizColors.cyan, onTap: _speed),
               _Tool(icon: Icons.auto_awesome, label: 'Filters', color: RizColors.violet, onTap: _filters),

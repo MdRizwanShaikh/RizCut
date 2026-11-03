@@ -10,7 +10,10 @@ Android video editor (Flutter + on-device FFmpeg). Original design, CapCut/InSho
 Full roadmap: [docs/PLAN.md](docs/PLAN.md)
 
 ## Current features
-- Import video (guest mode, no login)
+- Import videos and photos (guest mode, no login), several at once; add more
+  from the editor
+- Canvas ratio (Original, 9:16, 1:1, 16:9, 4:5) with blurred or solid
+  background
 - Multi-clip timeline with centre playhead and scrubbing
 - Split, delete, per-clip speed (0.25x–4x), undo/redo
 - Trim handles on the selected clip, timeline zoom, arrange clips (drag to reorder)

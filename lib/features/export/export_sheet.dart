@@ -42,7 +42,6 @@ class _ExportSheetState extends State<ExportSheet> {
     });
     try {
       final out = await _exporter.export(
-        input: widget.source.location,
         project: widget.project,
         previewSize: widget.previewSize,
         settings: ExportSettings(resolution: _resolution, fps: _fps),

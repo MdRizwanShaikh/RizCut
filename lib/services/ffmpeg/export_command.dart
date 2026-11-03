@@ -5,6 +5,7 @@
 library;
 
 import '../../features/editor/color_grade.dart';
+import '../../features/editor/media.dart';
 import '../../features/editor/project.dart';
 
 enum ExportResolution {
@@ -150,14 +151,60 @@ class MusicInput {
   final bool fade;
 }
 
-/// Builds the full export command for a multi-clip [project].
+/// What the exporter learned about one media file.
+class ExportMedia {
+  const ExportMedia({
+    required this.path,
+    required this.isImage,
+    this.hasAudio = false,
+  });
+  final String path;
+  final bool isImage;
+  final bool hasAudio;
+}
+
+/// Output size for a canvas ratio at [shortSide] (even numbers).
+/// `original` uses the source size and never upscales.
+({int width, int height}) canvasSize(
+    CanvasRatio ratio, int srcW, int srcH, int shortSide) {
+  if (ratio.aspect == null) return outputSize(srcW, srcH, shortSide);
+  int even(double v) => (v / 2).round() * 2;
+  final a = ratio.aspect!;
+  return a >= 1
+      ? (width: even(shortSide * a), height: even(shortSide.toDouble()))
+      : (width: even(shortSide.toDouble()), height: even(shortSide / a));
+}
+
+/// Fits a clip into the W x H canvas over a blurred copy or a solid colour.
+List<String> _fitToCanvas(
+    String inLabel, String outLabel, int w, int h, BackgroundMode bg) {
+  final fit = 'scale=$w:$h:force_original_aspect_ratio=decrease:'
+      'force_divisible_by=2';
+  if (bg.argb != null) {
+    return [
+      '[$inLabel]$fit,pad=$w:$h:(ow-iw)/2:(oh-ih)/2:color=${bg.ffmpegColor}'
+          ',setsar=1[$outLabel]'
+    ];
+  }
+  return [
+    '[$inLabel]split=2[${inLabel}f][${inLabel}b]',
+    '[${inLabel}b]scale=$w:$h:force_original_aspect_ratio=increase,'
+        'crop=$w:$h,boxblur=20:2[${inLabel}bg]',
+    '[${inLabel}f]$fit[${inLabel}fg]',
+    '[${inLabel}bg][${inLabel}fg]overlay=(W-w)/2:(H-h)/2,setsar=1[$outLabel]',
+  ];
+}
+
+/// Builds the full export command for a multi-clip, multi-media [project].
+///
+/// Every clip is its own input, seeked with `-ss`/`-t` (videos) or looped
+/// (photos), so nothing is buffered while earlier clips are encoded.
 List<String> buildProjectExportArgs({
-  required String input,
   required String output,
   required Project project,
+  required Map<String, ExportMedia> media,
   required int width,
   required int height,
-  required bool hasAudio,
   required ExportSettings settings,
   List<OverlayImage> overlays = const [],
   MusicInput? music,
@@ -165,31 +212,41 @@ List<String> buildProjectExportArgs({
 }) {
   final clips = project.clips;
   if (clips.isEmpty) throw ArgumentError('project has no clips');
+  final inputs = <String>[];
   final graph = <String>[];
   final concatInputs = StringBuffer();
   final grade = gradeFilter(project.grade);
   final half = kTransitionHalf.inMicroseconds / 1e6;
+  final fps = settings.fps;
 
   for (var i = 0; i < clips.length; i++) {
     final c = clips[i];
+    final m = media[c.mediaId];
+    if (m == null) throw ArgumentError('clip $i has no media');
     if (c.sourceOut <= c.sourceIn) {
       throw ArgumentError('clip $i has an empty range');
     }
-    final a = ffmpegSeconds(c.sourceIn), b = ffmpegSeconds(c.sourceOut);
-    final speed = _num(c.speed);
     final len = c.timelineLength.inMicroseconds / 1e6;
+    final lenS = len.toStringAsFixed(3);
+    if (m.isImage) {
+      inputs.addAll(['-loop', '1', '-framerate', '$fps', '-t', lenS, '-i', m.path]);
+    } else {
+      inputs.addAll([
+        '-ss', ffmpegSeconds(c.sourceIn),
+        '-t', ffmpegSeconds(c.sourceLength),
+        '-i', m.path,
+      ]);
+    }
+    final speed = m.isImage ? '1' : _num(c.speed);
     final d = half < len / 2 ? half : len / 2;
     final inType = i > 0 ? clips[i - 1].transitionOut : TransitionType.none;
     final outType = i < clips.length - 1 ? c.transitionOut : TransitionType.none;
     String color(TransitionType t) =>
         t == TransitionType.fadeWhite ? 'white' : 'black';
 
+    graph.add('[$i:v]setpts=(PTS-STARTPTS)/$speed,fps=$fps,format=yuv420p[r$i]');
+    graph.addAll(_fitToCanvas('r$i', 'c$i', width, height, project.background));
     final v = <String>[
-      'trim=start=$a:end=$b',
-      'setpts=(PTS-STARTPTS)/$speed',
-      'scale=$width:$height',
-      'setsar=1',
-      'fps=${settings.fps}',
       if (grade.isNotEmpty) grade,
       if (inType != TransitionType.none)
         'fade=t=in:st=0:d=${d.toStringAsFixed(3)}:color=${color(inType)}',
@@ -198,31 +255,37 @@ List<String> buildProjectExportArgs({
             'd=${d.toStringAsFixed(3)}:color=${color(outType)}',
       'format=yuv420p',
     ];
-    graph.add('[0:v]${v.join(',')}[v$i]');
+    graph.add('[c$i]${v.join(',')}[v$i]');
     concatInputs.write('[v$i]');
-    if (hasAudio) {
-      final au = <String>[
-        'atrim=start=$a:end=$b',
+
+    final au = <String>[
+      if (m.hasAudio && !m.isImage) ...[
         'asetpts=PTS-STARTPTS',
         atempoChain(c.speed),
-        'aresample=44100',
-        if (inType != TransitionType.none)
-          'afade=t=in:st=0:d=${d.toStringAsFixed(3)}',
-        if (outType != TransitionType.none)
-          'afade=t=out:st=${(len - d).toStringAsFixed(3)}:d=${d.toStringAsFixed(3)}',
-      ];
-      graph.add('[0:a]${au.join(',')}[a$i]');
-      concatInputs.write('[a$i]');
-    }
+      ],
+      'aresample=44100',
+      'aformat=sample_rates=44100:channel_layouts=stereo',
+      'apad',
+      'atrim=0:$lenS',
+      if (inType != TransitionType.none)
+        'afade=t=in:st=0:d=${d.toStringAsFixed(3)}',
+      if (outType != TransitionType.none)
+        'afade=t=out:st=${(len - d).toStringAsFixed(3)}:d=${d.toStringAsFixed(3)}',
+    ];
+    final src = m.hasAudio && !m.isImage
+        ? '[$i:a]'
+        : 'anullsrc=r=44100:cl=stereo,';
+    graph.add('$src${au.join(',')}[a$i]');
+    concatInputs.write('[a$i]');
   }
-  graph.add('${concatInputs}concat=n=${clips.length}:v=1:a=${hasAudio ? 1 : 0}'
-      '[vc]${hasAudio ? '[ac]' : ''}');
+  graph.add('${concatInputs}concat=n=${clips.length}:v=1:a=1[vc][ac]');
 
   var last = 'vc';
+  final overlayBase = clips.length;
   for (var i = 0; i < overlays.length; i++) {
     final o = overlays[i];
     final next = 'o$i';
-    graph.add('[$last][${i + 1}:v]overlay='
+    graph.add('[$last][${overlayBase + i}:v]overlay='
         'x=main_w*${_num(o.centerX)}-overlay_w/2:'
         'y=main_h*${_num(o.centerY)}-overlay_h/2:'
         "enable='between(t,${ffmpegSeconds(o.start)},${ffmpegSeconds(o.end)})'"
@@ -230,9 +293,12 @@ List<String> buildProjectExportArgs({
     last = next;
   }
 
-  // Audio: original (with volume) and/or looping background music.
   final total = project.duration.inMicroseconds / 1e6;
-  final useOriginal = hasAudio && project.originalVolume > 0;
+  final anyAudio = clips.any((c) {
+    final m = media[c.mediaId];
+    return m != null && m.hasAudio && !m.isImage;
+  });
+  final useOriginal = anyAudio && project.originalVolume > 0;
   String? audioOut;
   if (useOriginal) {
     if (project.originalVolume == 1) {
@@ -243,10 +309,11 @@ List<String> buildProjectExportArgs({
     }
   }
   if (music != null) {
-    final idx = overlays.length + 1;
+    final idx = overlayBase + overlays.length;
     final fadeOut = total > 3 ? 1.5 : total / 3;
-    final m = <String>[
+    final mf = <String>[
       'aresample=44100',
+      'aformat=sample_rates=44100:channel_layouts=stereo',
       'atrim=0:${total.toStringAsFixed(3)}',
       'asetpts=PTS-STARTPTS',
       'volume=${_num(music.volume)}',
@@ -256,13 +323,17 @@ List<String> buildProjectExportArgs({
             'd=${fadeOut.toStringAsFixed(3)}',
       ],
     ];
-    graph.add('[$idx:a]${m.join(',')}[m]');
+    graph.add('[$idx:a]${mf.join(',')}[m]');
     if (audioOut != null) {
       graph.add('[$audioOut][m]amix=inputs=2:duration=first:normalize=0[am]');
       audioOut = 'am';
     } else {
       audioOut = 'm';
     }
+  }
+  if (audioOut == null) {
+    // Silent concat audio is discarded.
+    graph.add('[ac]anullsink');
   }
 
   final videoCodecArgs = switch (encoder) {
@@ -278,13 +349,14 @@ List<String> buildProjectExportArgs({
 
   return [
     '-y',
-    '-i', input,
+    ...inputs,
     for (final o in overlays) ...['-i', o.path],
     if (music != null) ...['-stream_loop', '-1', '-i', music.path],
     '-filter_complex', graph.join(';'),
     '-map', '[$last]',
     if (audioOut != null) ...['-map', '[$audioOut]', '-c:a', 'aac', '-b:a', '128k'],
     ...videoCodecArgs,
+    '-pix_fmt', 'yuv420p',
     '-t', total.toStringAsFixed(3),
     '-movflags', '+faststart',
     output,

@@ -27,7 +27,6 @@ class _FfmpegExporter implements ProjectExporter {
 
   @override
   Future<String> export({
-    required String input,
     required Project project,
     required ui.Size previewSize,
     required ExportSettings settings,
@@ -38,10 +37,30 @@ class _FfmpegExporter implements ProjectExporter {
     final stamp = DateTime.now().millisecondsSinceEpoch;
     final output = '${dir.path}/RizCut_$stamp.mp4';
 
-    final probe = await _probe(input);
-    final src = probe.size ??
+    // Probe every media item once: size (with rotation) and audio.
+    final media = <String, ExportMedia>{};
+    ({int width, int height})? firstSize;
+    for (final c in project.clips) {
+      if (media.containsKey(c.mediaId)) continue;
+      final m = project.mediaFor(c);
+      if (m == null || m.source.isUrl) {
+        throw ExportFailed('A clip points to a file that is not on this device.');
+      }
+      final probe = await _probe(m.source.location);
+      media[c.mediaId] = ExportMedia(
+        path: m.source.location,
+        isImage: m.isImage,
+        hasAudio: !m.isImage && probe.hasAudio,
+      );
+      firstSize ??= probe.size ??
+          (m.width != null && m.height != null
+              ? (width: m.width!, height: m.height!)
+              : null);
+    }
+    final src = firstSize ??
         (width: previewSize.width.round(), height: previewSize.height.round());
-    final out = outputSize(src.width, src.height, settings.resolution.shortSide);
+    final out = canvasSize(
+        project.canvas, src.width, src.height, settings.resolution.shortSide);
 
     final overlays = <OverlayImage>[];
     final temp = <File>[];
@@ -71,12 +90,11 @@ class _FfmpegExporter implements ProjectExporter {
       for (final encoder in VideoEncoder.values) {
         if (_cancelled) throw ExportCancelled();
         final args = buildProjectExportArgs(
-          input: input,
           output: output,
           project: project,
+          media: media,
           width: out.width,
           height: out.height,
-          hasAudio: probe.hasAudio,
           settings: settings,
           overlays: overlays,
           music: music,

@@ -1,6 +1,7 @@
 import 'dart:ui' show Color, Offset;
 
 import 'color_grade.dart';
+import 'media.dart';
 
 /// Allowed playback speeds for a clip.
 const kSpeeds = <double>[0.25, 0.5, 1, 1.5, 2, 4];
@@ -18,14 +19,19 @@ enum TransitionType {
 /// Each side of a transition lasts this long (total = 2x).
 const kTransitionHalf = Duration(milliseconds: 300);
 
-/// A segment of the source video placed on the timeline.
+/// A segment of a media item (video or photo) placed on the timeline.
+/// For photos, `sourceIn` is zero and `sourceOut` is the shown length.
 class VideoClip {
   const VideoClip({
+    this.mediaId = 'm0',
     required this.sourceIn,
     required this.sourceOut,
     this.speed = 1,
     this.transitionOut = TransitionType.none,
   }) : assert(speed > 0);
+
+  /// Which [MediaItem] this clip shows.
+  final String mediaId;
 
   /// Range inside the source file.
   final Duration sourceIn, sourceOut;
@@ -45,6 +51,7 @@ class VideoClip {
     TransitionType? transitionOut,
   }) =>
       VideoClip(
+        mediaId: mediaId,
         sourceIn: sourceIn ?? this.sourceIn,
         sourceOut: sourceOut ?? this.sourceOut,
         speed: speed ?? this.speed,
@@ -52,6 +59,7 @@ class VideoClip {
       );
 
   Map<String, Object?> toJson() => {
+        'media': mediaId,
         'in': sourceIn.inMicroseconds,
         'out': sourceOut.inMicroseconds,
         'speed': speed,
@@ -59,6 +67,7 @@ class VideoClip {
       };
 
   factory VideoClip.fromJson(Map<String, Object?> j) => VideoClip(
+        mediaId: j['media'] as String? ?? 'm0',
         sourceIn: Duration(microseconds: (j['in'] as num).toInt()),
         sourceOut: Duration(microseconds: (j['out'] as num).toInt()),
         speed: (j['speed'] as num?)?.toDouble() ?? 1,
@@ -201,6 +210,9 @@ class TimelineHit {
 class Project {
   const Project({
     required this.clips,
+    this.media = const [],
+    this.canvas = CanvasRatio.original,
+    this.background = BackgroundMode.blur,
     this.texts = const [],
     this.grade = const ColorGrade(),
     this.music,
@@ -210,11 +222,51 @@ class Project {
   factory Project.single(Duration sourceDuration) => Project(
       clips: [VideoClip(sourceIn: Duration.zero, sourceOut: sourceDuration)]);
 
+  /// A new project showing [item] in full.
+  factory Project.fromMedia(MediaItem item) => Project(
+        media: List.unmodifiable([item]),
+        clips: List.unmodifiable([clipFor(item)]),
+      );
+
+  /// A clip covering all of [item] (photos get the default length).
+  static VideoClip clipFor(MediaItem item) => VideoClip(
+        mediaId: item.id,
+        sourceIn: Duration.zero,
+        sourceOut: item.isImage ? kDefaultPhotoLength : item.duration,
+      );
+
   /// Shortest clip we allow after splitting/trimming.
   static const minClip = Duration(milliseconds: 100);
 
   final List<VideoClip> clips;
+
+  /// Imported files the clips point to.
+  final List<MediaItem> media;
+  final CanvasRatio canvas;
+  final BackgroundMode background;
   final List<TextOverlay> texts;
+
+  MediaItem? mediaById(String id) {
+    for (final m in media) {
+      if (m.id == id) return m;
+    }
+    return null;
+  }
+
+  MediaItem? mediaFor(VideoClip c) => mediaById(c.mediaId);
+
+  /// Canvas aspect (width / height); `original` follows the first sized item.
+  double canvasAspect({double fallback = 9 / 16}) {
+    final a = canvas.aspect;
+    if (a != null) return a;
+    for (final c in clips) {
+      final m = mediaFor(c);
+      if (m?.width != null && m?.height != null && m!.height! > 0) {
+        return m.width! / m.height!;
+      }
+    }
+    return fallback;
+  }
   final ColorGrade grade;
   final MusicTrack? music;
 
@@ -264,6 +316,9 @@ class Project {
 
   Project copyWith({
     List<VideoClip>? clips,
+    List<MediaItem>? media,
+    CanvasRatio? canvas,
+    BackgroundMode? background,
     List<TextOverlay>? texts,
     ColorGrade? grade,
     MusicTrack? music,
@@ -272,6 +327,9 @@ class Project {
   }) =>
       Project(
         clips: clips == null ? this.clips : List.unmodifiable(clips),
+        media: media == null ? this.media : List.unmodifiable(media),
+        canvas: canvas ?? this.canvas,
+        background: background ?? this.background,
         texts: texts == null ? this.texts : List.unmodifiable(texts),
         grade: grade ?? this.grade,
         music: clearMusic ? null : (music ?? this.music),
@@ -325,6 +383,16 @@ class Project {
               clips[index].copyWith(sourceIn: sourceIn, sourceOut: sourceOut));
   }
 
+  /// Appends [items] to the media list and adds a clip for each at the end.
+  Project addMedia(List<MediaItem> items) => copyWith(
+        media: [...media, ...items],
+        clips: [...clips, for (final m in items) clipFor(m)],
+      );
+
+  /// Updates stored info (duration/size) for a media item.
+  Project updateMedia(MediaItem item) => copyWith(
+      media: [for (final m in media) m.id == item.id ? item : m]);
+
   Project addText(TextOverlay t) => copyWith(texts: [...texts, t]);
 
   Project updateText(int i, TextOverlay t) =>
@@ -333,7 +401,10 @@ class Project {
   Project removeText(int i) => copyWith(texts: [...texts]..removeAt(i));
 
   Map<String, Object?> toJson() => {
-        'v': 1,
+        'v': 2,
+        'media': [for (final m in media) m.toJson()],
+        'canvas': canvas.name,
+        'bg': background.name,
         'clips': [for (final c in clips) c.toJson()],
         'texts': [for (final t in texts) t.toJson()],
         'grade': grade.toJson(),
@@ -341,7 +412,19 @@ class Project {
         'origVol': originalVolume,
       };
 
-  factory Project.fromJson(Map<String, Object?> j) => Project(
+  /// [fallback] supplies the media list for v1 drafts (single source, 'm0').
+  factory Project.fromJson(Map<String, Object?> j, {MediaItem? fallback}) =>
+      Project(
+        media: List.unmodifiable(j['media'] == null
+            ? [?fallback]
+            : [
+                for (final m in j['media'] as List)
+                  MediaItem.fromJson((m as Map).cast()),
+              ]),
+        canvas: CanvasRatio.values.asNameMap()[j['canvas']] ??
+            CanvasRatio.original,
+        background: BackgroundMode.values.asNameMap()[j['bg']] ??
+            BackgroundMode.blur,
         clips: List.unmodifiable([
           for (final c in j['clips'] as List)
             VideoClip.fromJson((c as Map).cast()),
