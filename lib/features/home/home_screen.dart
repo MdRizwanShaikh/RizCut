@@ -6,6 +6,7 @@ import '../../core/theme.dart';
 import '../../services/storage/draft_store.dart';
 import '../editor/editor_screen.dart';
 import '../editor/video_source.dart';
+import '../settings/settings_screen.dart';
 
 /// Guest-mode home: no sign-in wall, straight into editing.
 class HomeScreen extends StatefulWidget {
@@ -136,7 +137,12 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     const Spacer(),
                     IconButton(
-                      onPressed: () {},
+                      key: const Key('settings'),
+                      tooltip: 'Settings',
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                            builder: (_) => const SettingsScreen()),
+                      ),
                       icon: const Icon(Icons.settings_outlined),
                     ),
                   ],

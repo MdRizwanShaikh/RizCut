@@ -1,0 +1,13 @@
+rules_version = '2';
+// Each signed-in user can read and write only their own backups.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{uid} {
+      allow read, write, delete: if request.auth != null && request.auth.uid == uid;
+      match /drafts/{draftId} {
+        allow read, write, delete: if request.auth != null && request.auth.uid == uid
+          && (request.resource == null || request.resource.data.json.size() < 900000);
+      }
+    }
+  }
+}

@@ -3,9 +3,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/theme.dart';
+import 'services/cloud/cloud_service.dart';
 import 'features/home/home_screen.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  // Optional login/backup; a no-op when Firebase isn't configured.
+  CloudService.instance.init();
   runApp(const ProviderScope(child: RizCutApp()));
 }
 
