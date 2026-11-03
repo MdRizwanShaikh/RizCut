@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -17,7 +18,16 @@ class RizCutApp extends StatelessWidget {
       title: 'RizCut',
       debugShowCheckedModeBanner: false,
       theme: buildRizCutTheme(),
+      scrollBehavior: const _DragEverywhere(),
       home: const HomeScreen(),
     );
   }
+}
+
+/// Lets mouse/trackpad drag scroll the timeline too (web preview, desktop).
+class _DragEverywhere extends MaterialScrollBehavior {
+  const _DragEverywhere();
+
+  @override
+  Set<PointerDeviceKind> get dragDevices => PointerDeviceKind.values.toSet();
 }

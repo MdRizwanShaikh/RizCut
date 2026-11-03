@@ -63,6 +63,22 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+  assets:
+    - assets/branding/icon.png
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-Regular.otf
+        - asset: assets/fonts/Inter-Medium.otf
+          weight: 500
+        - asset: assets/fonts/Inter-SemiBold.otf
+          weight: 600
+        - asset: assets/fonts/Inter-Bold.otf
+          weight: 700
+        - asset: assets/fonts/Inter-ExtraBold.otf
+          weight: 800
+        - asset: assets/fonts/Inter-Black.otf
+          weight: 900
 
   # To add assets to your application, add an assets section, like this:
   # assets:

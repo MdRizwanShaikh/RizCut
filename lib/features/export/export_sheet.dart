@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:gal/gal.dart';
-import 'package:share_plus/share_plus.dart';
 
+import '../../core/theme.dart';
 import '../../services/ffmpeg/export_command.dart';
-import '../../services/ffmpeg/video_exporter.dart';
+import '../../services/ffmpeg/project_exporter.dart';
+import '../editor/project.dart';
+import '../editor/video_source.dart';
 
 enum _Stage { choose, rendering, done, failed }
 
@@ -12,20 +13,21 @@ enum _Stage { choose, rendering, done, failed }
 class ExportSheet extends StatefulWidget {
   const ExportSheet({
     super.key,
-    required this.input,
-    required this.start,
-    required this.end,
+    required this.source,
+    required this.project,
+    required this.previewSize,
   });
 
-  final String input;
-  final Duration start, end;
+  final VideoSource source;
+  final Project project;
+  final Size previewSize;
 
   @override
   State<ExportSheet> createState() => _ExportSheetState();
 }
 
 class _ExportSheetState extends State<ExportSheet> {
-  final _exporter = VideoExporter();
+  final _exporter = ProjectExporter();
   ExportResolution _resolution = ExportResolution.p720;
   int _fps = 30;
   _Stage _stage = _Stage.choose;
@@ -39,21 +41,16 @@ class _ExportSheetState extends State<ExportSheet> {
       _progress = 0;
     });
     try {
-      final out = await _exporter.exportTrim(
-        input: widget.input,
-        start: widget.start,
-        end: widget.end,
+      final out = await _exporter.export(
+        input: widget.source.location,
+        project: widget.project,
+        previewSize: widget.previewSize,
         settings: ExportSettings(resolution: _resolution, fps: _fps),
         onProgress: (p) {
           if (mounted) setState(() => _progress = p);
         },
       );
-      var msg = 'Saved to gallery (RizCut album)';
-      try {
-        await Gal.putVideo(out, album: 'RizCut');
-      } on GalException catch (e) {
-        msg = 'Rendered, but saving to gallery failed: ${e.type.message}';
-      }
+      final msg = await _exporter.saveToGallery(out);
       if (!mounted) return;
       setState(() {
         _output = out;
@@ -83,6 +80,12 @@ class _ExportSheetState extends State<ExportSheet> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Text('Export', style: theme.textTheme.titleLarge),
+                const SizedBox(height: 4),
+                Text(
+                  '${widget.project.clips.length} clips · '
+                  '${(widget.project.duration.inMilliseconds / 1000).toStringAsFixed(1)}s',
+                  style: const TextStyle(color: RizColors.textDim),
+                ),
                 const SizedBox(height: 16),
                 const Text('Resolution'),
                 const SizedBox(height: 8),
@@ -106,6 +109,21 @@ class _ExportSheetState extends State<ExportSheet> {
                   selected: {_fps},
                   onSelectionChanged: (s) => setState(() => _fps = s.first),
                 ),
+                if (!_exporter.supported) ...[
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: RizColors.blue.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                          color: RizColors.blue.withValues(alpha: 0.5)),
+                    ),
+                    child: const Text(
+                      'Web preview: export runs on-device in the Android app.',
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 24),
                 Row(
                   children: [
@@ -114,9 +132,10 @@ class _ExportSheetState extends State<ExportSheet> {
                       child: const Text('Cancel'),
                     ),
                     const Spacer(),
-                    FilledButton(
-                      onPressed: _start,
-                      child: const Text('Export video'),
+                    GradientButton(
+                      onPressed: _exporter.supported ? _start : null,
+                      icon: Icons.rocket_launch_outlined,
+                      label: 'Export video',
                     ),
                   ],
                 ),
@@ -128,9 +147,18 @@ class _ExportSheetState extends State<ExportSheet> {
                 Text('Rendering… ${(_progress * 100).round()}%',
                     style: theme.textTheme.titleMedium),
                 const SizedBox(height: 16),
-                LinearProgressIndicator(value: _progress),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: LinearProgressIndicator(
+                    value: _progress,
+                    minHeight: 10,
+                    backgroundColor: RizColors.outline,
+                    color: RizColors.magenta,
+                  ),
+                ),
                 const SizedBox(height: 8),
-                const Text('Keep the app open while exporting.'),
+                const Text('Keep the app open while exporting.',
+                    style: TextStyle(color: RizColors.textDim)),
                 const SizedBox(height: 16),
                 OutlinedButton(
                   onPressed: _exporter.cancel,
@@ -141,8 +169,8 @@ class _ExportSheetState extends State<ExportSheet> {
           _Stage.done => Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.check_circle,
-                    size: 56, color: theme.colorScheme.primary),
+                const Icon(Icons.check_circle,
+                    size: 56, color: RizColors.cyan),
                 const SizedBox(height: 12),
                 Text(_message, textAlign: TextAlign.center),
                 const SizedBox(height: 16),
@@ -153,12 +181,10 @@ class _ExportSheetState extends State<ExportSheet> {
                       child: const Text('Done'),
                     ),
                     const Spacer(),
-                    FilledButton.icon(
-                      onPressed: () => SharePlus.instance.share(
-                        ShareParams(files: [XFile(_output!)]),
-                      ),
-                      icon: const Icon(Icons.share),
-                      label: const Text('Share'),
+                    GradientButton(
+                      onPressed: () => _exporter.share(_output!),
+                      icon: Icons.share,
+                      label: 'Share',
                     ),
                   ],
                 ),
