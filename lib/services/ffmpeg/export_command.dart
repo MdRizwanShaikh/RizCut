@@ -6,6 +6,7 @@ library;
 
 import '../../features/editor/clip_look.dart';
 import '../../features/editor/color_grade.dart';
+import '../../features/editor/keyframes.dart';
 import '../../features/editor/media.dart';
 import '../../features/editor/project.dart';
 
@@ -130,6 +131,11 @@ class OverlayImage {
     required this.end,
     required this.centerX,
     required this.centerY,
+    this.animIn = TextAnim.none,
+    this.animOut = TextAnim.none,
+    this.opacity = 1,
+    this.keyframes = const [],
+    this.lockX = false,
   });
 
   final String path;
@@ -137,7 +143,35 @@ class OverlayImage {
 
   /// Center position relative to the output frame (0..1).
   final double centerX, centerY;
+  final TextAnim animIn, animOut;
+  final double opacity;
+
+  /// Centre position/opacity over time (absolute timeline times).
+  final List<Keyframe> keyframes;
+
+  /// Caption bands stay horizontally centred.
+  final bool lockX;
+
+  bool get isAnimated =>
+      animIn != TextAnim.none ||
+      animOut != TextAnim.none ||
+      opacity != 1 ||
+      keyframes.isNotEmpty;
 }
+
+String _sec(Duration d) => (d.inMicroseconds / 1e6).toStringAsFixed(4);
+
+/// Opacity over time as an expression in [tv] (keyframes or a constant),
+/// with times shifted by [shift] seconds (for stream-local clocks).
+String _opacityExpr(List<Keyframe> k, double opacity, {String tv = 'T', double shift = 0}) {
+  if (k.isEmpty) return opacity.toStringAsFixed(4);
+  final s = sortedKeyframes(k);
+  return piecewiseExpr(
+      [for (final f in s) (f.at.inMicroseconds / 1e6 - shift, f.opacity)], tv: tv);
+}
+
+bool _opacityVaries(List<Keyframe> k, double opacity) =>
+    k.isEmpty ? opacity != 1 : k.any((f) => f.opacity != 1);
 
 /// Colour grade as FFmpeg filters (empty when the grade is identity).
 ///
@@ -457,12 +491,30 @@ List<String> buildProjectExportArgs({
     final px = l.frame.pixels(width, height);
     final st = ffmpegSeconds(l.start);
     final lg = l.grade == null ? grade : gradeFilter(l.grade!);
+    final alpha = <String>[
+      if (l.chromaKey != null)
+        'colorkey=0x${(l.chromaKey! & 0xFFFFFF).toRadixString(16).padLeft(6, '0')}:'
+            '${l.keySimilarity.toStringAsFixed(3)}:0.08',
+      if (_opacityVaries(l.keyframes, l.opacity))
+        (l.keyframes.isEmpty
+            ? 'colorchannelmixer=aa=${l.opacity.toStringAsFixed(4)}'
+            : "geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':"
+                "a='alpha(X,Y)*(${_opacityExpr(l.keyframes, l.opacity, shift: l.start.inMicroseconds / 1e6)})'"),
+    ];
     graph.add('[$k:v]setpts=PTS-STARTPTS,fps=$fps,'
         'scale=${px.w}:${px.h}:force_original_aspect_ratio=increase,'
         'crop=${px.w}:${px.h},setsar=1,'
-        '${lg.isEmpty ? '' : '$lg,'}format=yuv420p,'
+        '${lg.isEmpty ? '' : '$lg,'}'
+        '${alpha.isEmpty ? 'format=yuv420p' : 'format=rgba,${alpha.join(',')}'},'
         'setpts=PTS+$st/TB[l$j]');
-    graph.add("[$last][l$j]overlay=x=${px.x}:y=${px.y}:"
+    final lk = sortedKeyframes(l.keyframes);
+    final lx = lk.isEmpty
+        ? '${px.x}'
+        : "'main_w*(${piecewiseExpr([for (final f in lk) (f.at.inMicroseconds / 1e6, f.pos.dx)])})'";
+    final ly = lk.isEmpty
+        ? '${px.y}'
+        : "'main_h*(${piecewiseExpr([for (final f in lk) (f.at.inMicroseconds / 1e6, f.pos.dy)])})'";
+    graph.add("[$last][l$j]overlay=x=$lx:y=$ly:"
         "enable='between(t,$st,${ffmpegSeconds(l.end)})':eof_action=pass[y$j]");
     last = 'y$j';
     if (l.volume > 0 && m.hasAudio && !m.isImage) {
@@ -475,14 +527,52 @@ List<String> buildProjectExportArgs({
   }
 
   final overlayBase = clips.length + project.layers.length;
+  final overlayInputs = <String>[];
   for (var i = 0; i < overlays.length; i++) {
     final o = overlays[i];
     final next = 'o$i';
-    graph.add('[$last][${overlayBase + i}:v]overlay='
-        'x=main_w*${_num(o.centerX)}-overlay_w/2:'
-        'y=main_h*${_num(o.centerY)}-overlay_h/2:'
-        "enable='between(t,${ffmpegSeconds(o.start)},${ffmpegSeconds(o.end)})'"
-        '[$next]');
+    final k = overlayBase + i;
+    if (!o.isAnimated) {
+      overlayInputs.addAll(['-i', o.path]);
+      graph.add('[$last][$k:v]overlay='
+          'x=main_w*${_num(o.centerX)}-overlay_w/2:'
+          'y=main_h*${_num(o.centerY)}-overlay_h/2:'
+          "enable='between(t,${ffmpegSeconds(o.start)},${ffmpegSeconds(o.end)})'"
+          '[$next]');
+      last = next;
+      continue;
+    }
+    // Animated: loop the PNG for its time window, animate alpha in the
+    // stream, and move it with time expressions in overlay.
+    final s0 = o.start.inMicroseconds / 1e6, s1 = o.end.inMicroseconds / 1e6;
+    final len = s1 - s0;
+    overlayInputs.addAll(
+        ['-loop', '1', '-framerate', '$fps', '-t', len.toStringAsFixed(3), '-i', o.path]);
+    final al = kAnimLength.inMicroseconds / 1e6;
+    final f = <String>[
+      'format=rgba',
+      if (_opacityVaries(o.keyframes, o.opacity))
+        "geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':"
+            "a='alpha(X,Y)*(${_opacityExpr(o.keyframes, o.opacity, shift: s0)})'",
+      if (o.animIn == TextAnim.fade) 'fade=t=in:st=0:d=${al.toStringAsFixed(3)}:alpha=1',
+      if (o.animOut == TextAnim.fade)
+        'fade=t=out:st=${(len - al).toStringAsFixed(3)}:d=${al.toStringAsFixed(3)}:alpha=1',
+      'setpts=PTS-STARTPTS+${_sec(o.start)}/TB',
+    ];
+    graph.add('[$k:v]${f.join(',')}[tx$i]');
+    final keys = sortedKeyframes(o.keyframes);
+    final px = keys.isEmpty || o.lockX
+        ? _num(o.centerX)
+        : piecewiseExpr([for (final kf in keys) (kf.at.inMicroseconds / 1e6, kf.pos.dx)]);
+    final py = keys.isEmpty
+        ? _num(o.centerY)
+        : piecewiseExpr([for (final kf in keys) (kf.at.inMicroseconds / 1e6, kf.pos.dy)]);
+    final dx = slideOffsetExpr(o.animIn, o.animOut, s0, s1, axisX: true);
+    final dy = slideOffsetExpr(o.animIn, o.animOut, s0, s1, axisX: false);
+    graph.add("[$last][tx$i]overlay="
+        "x='main_w*($px+$dx)-overlay_w/2':"
+        "y='main_h*($py+$dy)-overlay_h/2':"
+        "enable='between(t,${_sec(o.start)},${_sec(o.end)})':eof_action=pass[$next]");
     last = next;
   }
 
@@ -566,7 +656,7 @@ List<String> buildProjectExportArgs({
   return [
     '-y',
     ...inputs,
-    for (final o in overlays) ...['-i', o.path],
+    ...overlayInputs,
     if (music != null) ...['-stream_loop', '-1', '-i', music.path],
     ...audioInputs,
     '-filter_complex', graph.join(';'),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme.dart';
+import 'keyframes.dart';
 import 'project.dart';
 
 const kTextColors = <Color>[
@@ -114,6 +115,37 @@ class _TextEditorSheetState extends State<TextEditorSheet> {
               ),
             ],
           ),
+          const Text('Animation', style: TextStyle(color: RizColors.textDim)),
+          const SizedBox(height: 8),
+          _AnimRow(
+            label: 'In',
+            value: _t.animIn,
+            onChanged: (a) => setState(() => _t = _t.copyWith(animIn: a)),
+          ),
+          const SizedBox(height: 6),
+          _AnimRow(
+            label: 'Out',
+            value: _t.animOut,
+            onChanged: (a) => setState(() => _t = _t.copyWith(animOut: a)),
+          ),
+          Row(
+            children: [
+              const Icon(Icons.opacity, color: RizColors.textDim),
+              Expanded(
+                child: Slider(
+                  value: _t.opacity,
+                  min: 0.1,
+                  onChanged: (v) => setState(() => _t = _t.copyWith(opacity: v)),
+                ),
+              ),
+              SizedBox(
+                width: 40,
+                child: Text('${(_t.opacity * 100).round()}%',
+                    textAlign: TextAlign.end,
+                    style: const TextStyle(color: RizColors.textDim)),
+              ),
+            ],
+          ),
           const Text('Style', style: TextStyle(color: RizColors.textDim)),
           const SizedBox(height: 8),
           Wrap(
@@ -181,6 +213,42 @@ enum _TextLook {
       background: false,
       color: light ? const Color(0xFF111111) : const Color(0xFFFFFFFF),
       position: Offset(0.5, t.position.dy),
+    );
+  }
+}
+
+class _AnimRow extends StatelessWidget {
+  const _AnimRow({required this.label, required this.value, required this.onChanged});
+  final String label;
+  final TextAnim value;
+  final ValueChanged<TextAnim> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 36,
+      child: Row(
+        children: [
+          SizedBox(width: 34, child: Text(label, style: const TextStyle(fontSize: 13))),
+          Expanded(
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              children: [
+                for (final a in TextAnim.values)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: ChoiceChip(
+                      label: Text(a.label),
+                      selected: a == value,
+                      selectedColor: RizColors.violet,
+                      onSelected: (_) => onChanged(a),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

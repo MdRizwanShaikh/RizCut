@@ -4,6 +4,7 @@ library;
 import 'dart:ui' show Offset;
 
 import 'color_grade.dart';
+import 'keyframes.dart';
 import 'media.dart';
 
 /// A rectangle in canvas fractions (0..1).
@@ -66,6 +67,10 @@ class Layer {
     this.frame = const FrameRect(0.58, 0.05, 0.38, 0.24),
     this.volume = 0,
     this.grade,
+    this.opacity = 1,
+    this.keyframes = const [],
+    this.chromaKey,
+    this.keySimilarity = 0.3,
   });
 
   final String id;
@@ -84,6 +89,17 @@ class Layer {
   /// The layer's own filter; null = use the project's filter.
   final ColorGrade? grade;
 
+  final double opacity;
+
+  /// Top-left position/opacity over time (absolute timeline times).
+  final List<Keyframe> keyframes;
+
+  /// Green-screen colour to remove (RGB as 0xRRGGBB), or null.
+  final int? chromaKey;
+
+  /// How close a colour must be to [chromaKey] to be removed (0.05..0.6).
+  final double keySimilarity;
+
   Duration get length => sourceOut - sourceIn;
   Duration get end => start + length;
   bool visibleAt(Duration t) => t >= start && t < end;
@@ -97,6 +113,11 @@ class Layer {
     String? mediaId,
     ColorGrade? grade,
     bool sameGradeAsProject = false,
+    double? opacity,
+    List<Keyframe>? keyframes,
+    int? chromaKey,
+    bool clearChromaKey = false,
+    double? keySimilarity,
   }) =>
       Layer(
         id: id,
@@ -107,6 +128,10 @@ class Layer {
         frame: frame ?? this.frame,
         volume: volume ?? this.volume,
         grade: sameGradeAsProject ? null : (grade ?? this.grade),
+        opacity: opacity ?? this.opacity,
+        keyframes: keyframes ?? this.keyframes,
+        chromaKey: clearChromaKey ? null : (chromaKey ?? this.chromaKey),
+        keySimilarity: keySimilarity ?? this.keySimilarity,
       );
 
   Map<String, Object?> toJson() => {
@@ -118,6 +143,10 @@ class Layer {
         'frame': frame.toJson(),
         if (volume != 0) 'vol': volume,
         if (grade != null) 'grade': grade!.toJson(),
+        if (opacity != 1) 'op': opacity,
+        if (keyframes.isNotEmpty) 'kf': [for (final k in keyframes) k.toJson()],
+        if (chromaKey != null) 'ck': chromaKey,
+        if (chromaKey != null) 'cks': keySimilarity,
       };
 
   factory Layer.fromJson(Map<String, Object?> j) => Layer(
@@ -133,6 +162,13 @@ class Layer {
         grade: j['grade'] == null
             ? null
             : ColorGrade.fromJson((j['grade'] as Map).cast()),
+        opacity: (j['op'] as num?)?.toDouble() ?? 1,
+        keyframes: [
+          for (final k in (j['kf'] as List?) ?? const [])
+            Keyframe.fromJson((k as Map).cast()),
+        ],
+        chromaKey: (j['ck'] as num?)?.toInt(),
+        keySimilarity: (j['cks'] as num?)?.toDouble() ?? 0.3,
       );
 }
 

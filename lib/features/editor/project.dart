@@ -2,6 +2,7 @@ import 'dart:ui' show Color, Offset;
 
 import 'audio_track.dart';
 import 'clip_look.dart';
+import 'keyframes.dart';
 import 'color_grade.dart';
 import 'layers.dart';
 import 'media.dart';
@@ -130,6 +131,10 @@ class TextOverlay {
     this.background = false,
     this.sticker,
     this.band,
+    this.animIn = TextAnim.none,
+    this.animOut = TextAnim.none,
+    this.opacity = 1,
+    this.keyframes = const [],
   });
 
   final String text;
@@ -151,6 +156,21 @@ class TextOverlay {
 
   bool get isBand => band != null && sticker == null;
 
+  final TextAnim animIn, animOut;
+
+  /// 0..1; keyframes (if any) override it over time.
+  final double opacity;
+
+  /// Position/opacity over time (absolute timeline times).
+  final List<Keyframe> keyframes;
+
+  /// Needs a per-frame overlay in export (otherwise a still PNG is enough).
+  bool get isAnimated =>
+      animIn != TextAnim.none ||
+      animOut != TextAnim.none ||
+      opacity != 1 ||
+      keyframes.isNotEmpty;
+
   bool get isSticker => sticker != null;
 
   bool visibleAt(Duration t) => t >= start && t < end;
@@ -166,6 +186,10 @@ class TextOverlay {
     int? sticker,
     int? band,
     bool clearBand = false,
+    TextAnim? animIn,
+    TextAnim? animOut,
+    double? opacity,
+    List<Keyframe>? keyframes,
   }) =>
       TextOverlay(
         text: text ?? this.text,
@@ -177,12 +201,20 @@ class TextOverlay {
         background: background ?? this.background,
         sticker: sticker ?? this.sticker,
         band: clearBand ? null : (band ?? this.band),
+        animIn: animIn ?? this.animIn,
+        animOut: animOut ?? this.animOut,
+        opacity: opacity ?? this.opacity,
+        keyframes: keyframes ?? this.keyframes,
       );
 
   Map<String, Object?> toJson() => {
         'text': text,
         if (sticker != null) 'sticker': sticker,
         if (band != null) 'band': band,
+        if (animIn != TextAnim.none) 'ain': animIn.name,
+        if (animOut != TextAnim.none) 'aout': animOut.name,
+        if (opacity != 1) 'op': opacity,
+        if (keyframes.isNotEmpty) 'kf': [for (final k in keyframes) k.toJson()],
         'start': start.inMicroseconds,
         'end': end.inMicroseconds,
         'color': color.toARGB32(),
@@ -205,6 +237,13 @@ class TextOverlay {
         background: j['bg'] as bool? ?? false,
         sticker: (j['sticker'] as num?)?.toInt(),
         band: (j['band'] as num?)?.toInt(),
+        animIn: TextAnim.values.asNameMap()[j['ain']] ?? TextAnim.none,
+        animOut: TextAnim.values.asNameMap()[j['aout']] ?? TextAnim.none,
+        opacity: (j['op'] as num?)?.toDouble() ?? 1,
+        keyframes: [
+          for (final k in (j['kf'] as List?) ?? const [])
+            Keyframe.fromJson((k as Map).cast()),
+        ],
       );
 }
 

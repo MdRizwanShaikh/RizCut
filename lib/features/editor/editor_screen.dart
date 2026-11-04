@@ -19,7 +19,9 @@ import 'clip_look.dart';
 import 'look_sheet.dart';
 import 'filter_sheet.dart';
 import '../../services/thumbs/thumbnailer.dart';
+import 'chroma_preview.dart';
 import 'image_provider.dart';
+import 'keyframes.dart';
 import 'layer_sheet.dart';
 import 'layers.dart';
 import 'media.dart';
@@ -132,6 +134,9 @@ class _EditorScreenState extends State<EditorScreen> {
   @override
   void initState() {
     super.initState();
+    ChromaPreview.load().then((_) {
+      if (mounted) setState(() {});
+    });
     _open();
   }
 
@@ -803,7 +808,8 @@ class _EditorScreenState extends State<EditorScreen> {
     final result = await showModalBottomSheet<LayerEdit>(
       context: context,
       isScrollControlled: true,
-      builder: (_) => LayerSheet(initial: l, hasSound: m != null && !m.isImage),
+      builder: (_) => SingleChildScrollView(
+          child: LayerSheet(initial: l, hasSound: m != null && !m.isImage)),
     );
     if (result == null) return;
     if (result.delete) {
@@ -1183,14 +1189,14 @@ class _EditorScreenState extends State<EditorScreen> {
     final result = await showModalBottomSheet<TextOverlay>(
       context: context,
       isScrollControlled: true,
-      builder: (_) => TextEditorSheet(
+      builder: (_) => SingleChildScrollView(child: TextEditorSheet(
         initial: existing ??
             TextOverlay(
               text: '',
               start: _t,
               end: _minDur(_t + const Duration(seconds: 3), p.duration),
             ),
-      ),
+      )),
     );
     if (result == null) return;
     if (index == null) {
@@ -1376,17 +1382,37 @@ class _EditorScreenState extends State<EditorScreen> {
                     _layerView(i, box.biggest),
                 for (final i in visible)
                   _TextOnPreview(
-                    overlay: p.texts[i],
+                    overlay: _shownText(p.texts[i]).overlay,
+                    alpha: _shownText(p.texts[i]).alpha,
                     box: box.biggest,
                     selected: i == _selectedText,
                     dimmed: !p.texts[i].visibleAt(_t),
-                    onTap: () => setState(() => _selectedText = i),
+                    onTap: () => setState(() {
+                      _selectedText = i;
+                      _selectedLayer = null;
+                    }),
                     onDoubleTap: () => _addOrEditText(i),
                     onMoved: (pos) {
                       setState(() {
                         _selectedText = i;
+                        final o = p.texts[i];
                         _project = p.updateText(
-                            i, p.texts[i].copyWith(position: pos));
+                          i,
+                          o.keyframes.isEmpty
+                              ? o.copyWith(position: pos)
+                              : o.copyWith(
+                                  keyframes: upsertKeyframe(
+                                    o.keyframes,
+                                    Keyframe(
+                                      at: _t,
+                                      pos: pos,
+                                      opacity: sampleKeyframes(
+                                              o.keyframes, _t, o.position, o.opacity)
+                                          .opacity,
+                                    ),
+                                  ),
+                                ),
+                        );
                       });
                     },
                     onMoveStart: () {
@@ -1457,10 +1483,67 @@ class _EditorScreenState extends State<EditorScreen> {
     return FittedBox(fit: fit, clipBehavior: Clip.hardEdge, child: child);
   }
 
+  /// Text as shown at the playhead: keyframes + in/out animation.
+  ({TextOverlay overlay, double alpha}) _shownText(TextOverlay o) {
+    final s = sampleKeyframes(o.keyframes, _t, o.position, o.opacity);
+    final a = animAt(o.animIn, o.animOut, o.start, o.end, _t);
+    return (overlay: o.copyWith(position: s.pos + a.offset), alpha: s.opacity * a.alpha);
+  }
+
+  /// Layer top-left + opacity at the playhead.
+  ({Offset pos, double opacity}) _shownLayer(Layer l) => sampleKeyframes(
+      l.keyframes, _t, Offset(l.frame.x, l.frame.y), l.opacity);
+
+  bool get _hasKeyframeAtPlayhead {
+    if (_selectedText != null && _selectedText! < p.texts.length) {
+      return keyframeAt(p.texts[_selectedText!].keyframes, _t) >= 0;
+    }
+    if (_selectedLayer != null && _selectedLayer! < p.layers.length) {
+      return keyframeAt(p.layers[_selectedLayer!].keyframes, _t) >= 0;
+    }
+    return false;
+  }
+
+  /// Adds a keyframe at the playhead for the selected text/layer, or removes
+  /// the one already there.
+  void _toggleKeyframe() {
+    _pause();
+    if (_selectedText != null) {
+      final i = _selectedText!;
+      final o = p.texts[i];
+      final at = keyframeAt(o.keyframes, _t);
+      if (at >= 0) {
+        _apply(p.updateText(i, o.copyWith(keyframes: [...o.keyframes]..removeAt(at))));
+        return;
+      }
+      final cur = sampleKeyframes(o.keyframes, _t, o.position, o.opacity);
+      _apply(p.updateText(i, o.copyWith(
+          keyframes: upsertKeyframe(o.keyframes,
+              Keyframe(at: _t, pos: cur.pos, opacity: cur.opacity)))));
+      if (o.keyframes.isEmpty) _toast('Keyframe added. Move the playhead, then drag to animate');
+    } else if (_selectedLayer != null) {
+      final i = _selectedLayer!;
+      final l = p.layers[i];
+      final at = keyframeAt(l.keyframes, _t);
+      if (at >= 0) {
+        _apply(p.updateLayer(i, l.copyWith(keyframes: [...l.keyframes]..removeAt(at))));
+        return;
+      }
+      final cur = _shownLayer(l);
+      _apply(p.updateLayer(i, l.copyWith(
+          keyframes: upsertKeyframe(l.keyframes,
+              Keyframe(at: _t, pos: cur.pos, opacity: cur.opacity)))));
+      if (l.keyframes.isEmpty) _toast('Keyframe added. Move the playhead, then drag to animate');
+    } else {
+      _toast('Select a text, sticker or layer first');
+    }
+  }
+
   /// A layer in its frame; tap to select, drag to move.
   Widget _layerView(int i, Size box) {
     final l = p.layers[i];
-    final f = l.frame;
+    final shown = _shownLayer(l);
+    final f = FrameRect(shown.pos.dx, shown.pos.dy, l.frame.w, l.frame.h);
     final m = p.mediaById(l.mediaId);
     final player = _layerPlayers[l.id];
     Widget media;
@@ -1481,6 +1564,18 @@ class _EditorScreenState extends State<EditorScreen> {
     if (!lg.isIdentity && !(kIsWeb && player != null)) {
       media = ColorFiltered(
           colorFilter: ColorFilter.matrix(lg.flutterMatrix), child: media);
+    }
+    if (l.chromaKey != null) {
+      final keyed = ChromaPreview.wrap(media, l.chromaKey!, l.keySimilarity);
+      media = keyed ??
+          Stack(fit: StackFit.expand, children: [
+            media,
+            const Positioned(
+              left: 4,
+              bottom: 4,
+              child: _Badge('Green screen shows in export'),
+            ),
+          ]);
     }
     final selected = i == _selectedLayer;
     return Positioned(
@@ -1503,18 +1598,24 @@ class _EditorScreenState extends State<EditorScreen> {
           });
         },
         onPanUpdate: (d) => setState(() {
-          final cur = p.layers[i].frame;
+          final layer = p.layers[i];
+          final now = _shownLayer(layer);
+          final cur = FrameRect(now.pos.dx, now.pos.dy, layer.frame.w, layer.frame.h)
+              .moveTo(Offset(now.pos.dx + d.delta.dx / box.width,
+                  now.pos.dy + d.delta.dy / box.height));
           _project = p.updateLayer(
             i,
-            p.layers[i].copyWith(
-              frame: cur.moveTo(Offset(cur.x + d.delta.dx / box.width,
-                  cur.y + d.delta.dy / box.height)),
-            ),
+            layer.keyframes.isEmpty
+                ? layer.copyWith(frame: cur)
+                : layer.copyWith(
+                    keyframes: upsertKeyframe(layer.keyframes,
+                        Keyframe(at: _t, pos: Offset(cur.x, cur.y), opacity: now.opacity)),
+                  ),
           );
         }),
         onPanEnd: (_) => _projectChanged(),
         child: Opacity(
-          opacity: l.visibleAt(_t) ? 1 : 0.45,
+          opacity: (l.visibleAt(_t) ? 1.0 : 0.45) * shown.opacity.clamp(0.0, 1.0),
           child: Container(
             foregroundDecoration: selected
                 ? BoxDecoration(
@@ -1636,6 +1737,18 @@ class _EditorScreenState extends State<EditorScreen> {
               padding: EdgeInsets.only(right: 6),
               child: Icon(Icons.auto_awesome, size: 16, color: RizColors.pink),
             ),
+          if (_selectedText != null || _selectedLayer != null)
+            IconButton(
+              key: const Key('keyframe'),
+              tooltip: _hasKeyframeAtPlayhead ? 'Remove keyframe' : 'Add keyframe',
+              visualDensity: VisualDensity.compact,
+              onPressed: _toggleKeyframe,
+              icon: Icon(
+                _hasKeyframeAtPlayhead ? Icons.diamond : Icons.diamond_outlined,
+                size: 20,
+                color: _hasKeyframeAtPlayhead ? RizColors.cyan : RizColors.textDim,
+              ),
+            ),
           _ZoomButton(
             icon: Icons.zoom_out,
             tooltip: 'Zoom out timeline',
@@ -1705,6 +1818,21 @@ class _EditorScreenState extends State<EditorScreen> {
 
 Duration _minDur(Duration a, Duration b) => a < b ? a : b;
 Duration _maxDur(Duration a, Duration b) => a > b ? a : b;
+
+class _Badge extends StatelessWidget {
+  const _Badge(this.text);
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          color: const Color(0xAA000000),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Text(text, style: const TextStyle(color: Colors.white, fontSize: 10)),
+      );
+}
 
 class _ZoomButton extends StatelessWidget {
   const _ZoomButton({required this.icon, required this.tooltip, this.onTap});
@@ -1816,9 +1944,11 @@ class _TextOnPreview extends StatelessWidget {
     required this.onMoved,
     required this.onMoveStart,
     required this.onMoveEnd,
+    this.alpha = 1,
   });
 
   final TextOverlay overlay;
+  final double alpha;
   final Size box;
   final bool selected, dimmed;
   final VoidCallback onTap, onDoubleTap, onMoveStart, onMoveEnd;
@@ -1846,7 +1976,7 @@ class _TextOnPreview extends StatelessWidget {
               (overlay.position.dy + d.delta.dy / box.height).clamp(0.05, 0.95),
             )),
             child: Opacity(
-              opacity: dimmed ? 0.45 : 1,
+              opacity: (dimmed ? 0.45 : 1.0) * alpha.clamp(0.0, 1.0),
               child: Container(
                 width: box.width,
                 padding: EdgeInsets.all(pad),
@@ -1884,7 +2014,7 @@ class _TextOnPreview extends StatelessWidget {
             onMoved(next);
           },
           child: Opacity(
-            opacity: dimmed ? 0.45 : 1,
+            opacity: (dimmed ? 0.45 : 1.0) * alpha.clamp(0.0, 1.0),
             child: Container(
               padding: EdgeInsets.all(pad),
               decoration: BoxDecoration(

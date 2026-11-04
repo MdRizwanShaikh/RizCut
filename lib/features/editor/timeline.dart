@@ -260,6 +260,23 @@ class _TimelineState extends State<Timeline> {
                                 onTap: () => widget.onTapText(i),
                               ),
                             ),
+                          // Keyframe diamonds on text/sticker and layer bars.
+                          for (var i = 0; i < p.texts.length; i++)
+                            for (final kf in p.texts[i].keyframes)
+                              Positioned(
+                                left: _px(kf.at) - 5,
+                                top: _laneHeight * _lanes(p).of[i].clamp(0, _maxLanes - 1) + 7,
+                                child: const IgnorePointer(child: _Diamond()),
+                              ),
+                          for (var j = 0; j < p.layers.length; j++)
+                            for (final kf in p.layers[j].keyframes)
+                              Positioned(
+                                left: _px(kf.at) - 5,
+                                top: _laneHeight *
+                                        _lanes(p).of[p.texts.length + j].clamp(0, _maxLanes - 1) +
+                                    7,
+                                child: const IgnorePointer(child: _Diamond()),
+                              ),
                         ],
                       ),
                     ),
@@ -322,6 +339,23 @@ const int _maxLanes = 4;
     of[i] = lane;
   }
   return (of: of, count: laneEnds.length);
+}
+
+class _Diamond extends StatelessWidget {
+  const _Diamond();
+
+  @override
+  Widget build(BuildContext context) => Transform.rotate(
+        angle: 0.785398,
+        child: Container(
+          width: 10,
+          height: 10,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            border: Border.all(color: RizColors.bg, width: 1.5),
+          ),
+        ),
+      );
 }
 
 class _AudioBar extends StatelessWidget {

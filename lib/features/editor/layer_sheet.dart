@@ -131,6 +131,64 @@ class _LayerSheetState extends State<LayerSheet> {
                   ),
                 ],
               ),
+            Row(
+              children: [
+                const Icon(Icons.opacity, size: 18, color: RizColors.textDim),
+                const SizedBox(width: 8),
+                const SizedBox(width: 70, child: Text('Opacity')),
+                Expanded(
+                  child: Slider(
+                    value: _l.opacity,
+                    min: 0.1,
+                    onChanged: (v) => setState(() => _l = _l.copyWith(opacity: v)),
+                  ),
+                ),
+                SizedBox(
+                  width: 40,
+                  child: Text('${(_l.opacity * 100).round()}%',
+                      textAlign: TextAlign.end,
+                      style: const TextStyle(color: RizColors.textDim)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            const Text('Green screen', style: TextStyle(color: RizColors.textDim)),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              children: [
+                for (final (label, key) in const [
+                  ('Off', null),
+                  ('Remove green', 0x00FF00),
+                  ('Remove blue', 0x0047FF),
+                ])
+                  ChoiceChip(
+                    key: Key('chroma-$label'),
+                    label: Text(label),
+                    selected: _l.chromaKey == key,
+                    selectedColor: RizColors.violet,
+                    onSelected: (_) => setState(() => _l = key == null
+                        ? _l.copyWith(clearChromaKey: true)
+                        : _l.copyWith(chromaKey: key)),
+                  ),
+              ],
+            ),
+            if (_l.chromaKey != null)
+              Row(
+                children: [
+                  const Icon(Icons.tune, size: 18, color: RizColors.textDim),
+                  const SizedBox(width: 8),
+                  const SizedBox(width: 70, child: Text('Strength')),
+                  Expanded(
+                    child: Slider(
+                      value: _l.keySimilarity,
+                      min: 0.05,
+                      max: 0.6,
+                      onChanged: (v) => setState(() => _l = _l.copyWith(keySimilarity: v)),
+                    ),
+                  ),
+                ],
+              ),
             const SizedBox(height: 4),
             const Text('Filter', style: TextStyle(color: RizColors.textDim)),
             const SizedBox(height: 8),

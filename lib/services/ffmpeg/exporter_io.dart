@@ -82,6 +82,11 @@ class _FfmpegExporter implements ProjectExporter {
         end: t.end,
         centerX: t.isBand ? 0.5 : t.position.dx,
         centerY: t.position.dy,
+        animIn: t.animIn,
+        animOut: t.animOut,
+        opacity: t.opacity,
+        keyframes: t.keyframes,
+        lockX: t.isBand,
       ));
     }
 
