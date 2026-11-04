@@ -36,6 +36,13 @@ Full roadmap: [docs/PLAN.md](docs/PLAN.md)
 - Transitions: fade black/white, pink flash, slide left/up, wipe, zoom;
   caption band text styles
 - Share to RizCut from other apps (Android share sheet)
+- Keyframes (position + opacity) for text, stickers and layers; text fade/slide
+  animations; layer opacity and green screen
+- Voiceover recording, built-in sound effects, per-clip volume, waveforms
+- Reverse, freeze frame, stabilize
+- Export 480p–4K, 24/30/60 fps, quality (bitrate) levels with size estimate
+- Comparison with VN / InShot / CapCut / Rush / LumaFusion:
+  [docs/COMPETITORS.md](docs/COMPETITORS.md)
 - Settings: optional Google/email sign-in, back up / restore drafts, delete
   account, privacy policy, licenses
 

@@ -458,7 +458,13 @@ class _QuickCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(title,
+                          maxLines: 1,
+                          style: const TextStyle(fontWeight: FontWeight.w700)),
+                    ),
                     Text(subtitle,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,

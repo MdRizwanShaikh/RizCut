@@ -111,7 +111,7 @@ With login:
   - *App activity → Other user-generated content* (project edit data in backups) — collected,
     optional, purpose **App functionality**.
 - Photos/videos: **not collected** (editing happens on device; nothing is uploaded).
-- Camera / microphone (Duet recording): used on device only → **not collected**.
+- Camera / microphone (Duet recording, voiceover): used on device only → **not collected**.
 - **Account deletion URL** (asked when the app has accounts): the privacy policy URL (it has a
   "Deleting your data" section).
 
@@ -129,7 +129,8 @@ RizCut is a fast, simple video editor for your phone. No sign-up needed — open
 
 EDIT
 • Trim, split, delete and rearrange clips
-• Speed from 0.25x to 4x
+• Speed from 0.25x to 4x, reverse, freeze frame, stabilize shaky video
+• Keyframe animation: move and fade text, stickers and layers over time
 • Mix videos and photos in one project
 • Rotate, flip and zoom-crop any clip
 • Ken Burns motion for photos: zoom in, zoom out, pan
@@ -139,6 +140,7 @@ LAYOUTS, DUETS & SHORTS
 • Duet / reaction: a reel plays below while you record yourself on top, or import your own video
 • Make a Short from any video: 15, 30 or 60 seconds of highlights in 9:16
 • Layers: put a video or photo on top, move it, resize it, give it its own filter
+• Green screen: remove a green or blue background from a layer
 • Share any video to RizCut from your gallery or other apps
 
 STYLE
@@ -147,14 +149,18 @@ STYLE
 • Stickers you can place anywhere
 • Transitions: fade, flash, slide, wipe and zoom
 • News-style caption bands in yellow, white, black or pink
+• Text animations: fade and slide in/out
 • Canvas for every app: 9:16, 1:1, 16:9, 4:5 with blurred or solid background
 
 SOUND
 • Add music from your phone, set volume, fade in and out
-• Turn the original sound up, down or off
+• Record a voiceover while the video plays
+• Built-in sound effects: whoosh, pop, ding, click, boom, rise
+• Volume for every clip (mute or boost to 200%) and audio waveforms
 
 EXPORT
-• 480p, 720p or 1080p at 30 or 60 fps
+• 480p, 720p, 1080p, 2K or 4K at 24, 30 or 60 fps
+• Choose the quality (bitrate) and see the file size before you export
 • Saved straight to your gallery and ready to share
 
 PRIVATE BY DESIGN
