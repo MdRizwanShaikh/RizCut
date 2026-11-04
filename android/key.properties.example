@@ -1,0 +1,6 @@
+# Copy to android/key.properties (git-ignored) and fill in.
+storePassword=CHANGE_ME
+keyPassword=CHANGE_ME
+keyAlias=upload
+# Absolute path, or relative to android/app/
+storeFile=/home/you/rizcut-upload.jks

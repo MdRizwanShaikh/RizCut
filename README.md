@@ -4,7 +4,7 @@ Android video editor (Flutter + on-device FFmpeg). Original design, CapCut/InSho
 
 - **Guest mode by default** — no login needed to edit or export.
 - **Zero server cost for video** — all rendering happens on the phone.
-- Optional login (Firebase Auth, free tier) planned only for project backup.
+- Optional login (Firebase Auth, free tier) only for backing up project edits.
 - AdMob planned only on the export step, 2–3 months after launch.
 
 Full roadmap: [docs/PLAN.md](docs/PLAN.md)
@@ -28,6 +28,8 @@ Full roadmap: [docs/PLAN.md](docs/PLAN.md)
 - Audio: original sound volume/mute, background music (loops, fade in/out)
 - Drafts auto-save on the device (no login) and reopen from Home
 - Export 480p / 720p / 1080p at 30/60 fps → gallery + share
+- Settings: optional Google/email sign-in, back up / restore drafts, delete
+  account, privacy policy, licenses
 
 ## Web preview
 `flutter build web --release --no-web-resources-cdn` builds a browser preview
@@ -54,3 +56,12 @@ flutter pub get
 flutter analyze && flutter test
 flutter run
 ```
+
+## Release to Google Play
+- Step-by-step guide: [docs/PLAY_STORE.md](docs/PLAY_STORE.md) (keystore, GitHub
+  secrets, Play Console answers, store listing text)
+- Release build: GitHub Actions → **Release (Play Store bundle)** → `app-release.aab`
+- Optional login/backup: [docs/FIREBASE_SETUP.md](docs/FIREBASE_SETUP.md)
+- Store graphics and screenshots: [docs/store/](docs/store/)
+- Privacy policy page: [docs/privacy-policy.html](docs/privacy-policy.html)
+  (publish with GitHub Pages from `/docs`)

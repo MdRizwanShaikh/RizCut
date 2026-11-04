@@ -138,7 +138,7 @@ class _TimelineState extends State<Timeline> {
   Widget build(BuildContext context) {
     final p = widget.project;
     return SizedBox(
-      height: 132,
+      height: 106 + _laneHeight * _lanes(p).count.clamp(1, _maxLanes),
       child: LayoutBuilder(builder: (context, box) {
         final half = box.maxWidth / 2;
         final active = widget.activeClip.clamp(0, p.clips.length - 1);
@@ -207,7 +207,7 @@ class _TimelineState extends State<Timeline> {
                     const SizedBox(height: 6),
                     SizedBox(
                       width: _px(p.duration),
-                      height: 26,
+                      height: _laneHeight * _lanes(p).count.clamp(1, _maxLanes),
                       child: Stack(
                         children: [
                           for (var i = 0; i < p.texts.length; i++)
@@ -215,8 +215,9 @@ class _TimelineState extends State<Timeline> {
                               left: _px(p.texts[i].start),
                               width: _px(p.texts[i].end - p.texts[i].start)
                                   .clamp(24.0, double.infinity),
-                              top: 0,
-                              bottom: 0,
+                              top: _laneHeight *
+                                  _lanes(p).of[i].clamp(0, _maxLanes - 1),
+                              height: _laneHeight - 4,
                               child: _TextBar(
                                 overlay: p.texts[i],
                                 selected: i == widget.selectedText,
@@ -255,6 +256,29 @@ class _TimelineState extends State<Timeline> {
       }),
     );
   }
+}
+
+const double _laneHeight = 28;
+const int _maxLanes = 3;
+
+/// Puts overlapping text/sticker bars on separate rows (greedy, by start).
+({List<int> of, int count}) _lanes(Project p) {
+  final order = [for (var i = 0; i < p.texts.length; i++) i]
+    ..sort((a, b) => p.texts[a].start.compareTo(p.texts[b].start));
+  final laneEnds = <Duration>[];
+  final of = List<int>.filled(p.texts.length, 0);
+  for (final i in order) {
+    final t = p.texts[i];
+    var lane = laneEnds.indexWhere((end) => end <= t.start);
+    if (lane < 0) {
+      laneEnds.add(t.end);
+      lane = laneEnds.length - 1;
+    } else {
+      laneEnds[lane] = t.end;
+    }
+    of[i] = lane;
+  }
+  return (of: of, count: laneEnds.length);
 }
 
 class _Ruler extends StatelessWidget {
