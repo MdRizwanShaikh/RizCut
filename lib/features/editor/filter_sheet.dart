@@ -138,10 +138,10 @@ class _Swatch extends StatelessWidget {
         gradient: LinearGradient(
           colors: [
             Color(0xFFFFB36B),
-            RizColors.magenta,
-            RizColors.violet,
-            RizColors.cyan,
-            Color(0xFF7DF9C2),
+            Color(0xFFFF6B8B),
+            Color(0xFF6E9BFF),
+            Color(0xFF5FD3C6),
+            Color(0xFFF7E27A),
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,

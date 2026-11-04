@@ -215,7 +215,7 @@ Future<List<int>> renderTextPng(TextOverlay t, double frameHeight,
     canvas.drawRect(rect, Paint()..color = Color(t.band!));
   } else if (t.background) {
     canvas.drawRRect(RRect.fromRectAndRadius(rect, Radius.circular(pad)),
-        Paint()..color = const Color(0xCC07031C));
+        Paint()..color = const Color(0xCC111214));
   }
   painter.paint(canvas, Offset((w - painter.width) / 2, pad));
   final image = await recorder.endRecording().toImage(w, h);

@@ -314,7 +314,7 @@ class _LayerBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const c = Color(0xFFFFB36B);
+    const c = Color(0xFFC9A26B);
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -526,10 +526,10 @@ class _TransitionBadge extends StatelessWidget {
       decoration: BoxDecoration(
         color: white ? Colors.white : RizColors.bg,
         shape: BoxShape.circle,
-        border: Border.all(color: const Color(0xFF7DF9C2), width: 2),
+        border: Border.all(color: RizColors.accent, width: 2),
       ),
       child: Icon(Icons.blur_on,
-          size: 14, color: white ? RizColors.bg : const Color(0xFF7DF9C2)),
+          size: 14, color: white ? RizColors.bg : RizColors.accent),
     );
   }
 }
