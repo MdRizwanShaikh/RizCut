@@ -201,12 +201,6 @@ class _DuetScreenState extends State<DuetScreen> {
             onPressed: _recording ? null : () => setState(() => _reelSound = !_reelSound),
             icon: Icon(_reelSound ? Icons.volume_up : Icons.volume_off),
           ),
-          if (_cams.length > 1)
-            IconButton(
-              tooltip: 'Switch camera',
-              onPressed: _recording ? null : _flipCamera,
-              icon: const Icon(Icons.cameraswitch_outlined),
-            ),
         ],
       ),
       body: Column(
@@ -294,78 +288,164 @@ class _DuetScreenState extends State<DuetScreen> {
   }
 
   Widget _controls() {
-    final canRecord = _cam != null && _reel != null;
+    final hasCamera = _cam != null && _cam!.value.isInitialized;
+    final canRecord = hasCamera && _reel != null;
     return SafeArea(
       top: false,
       child: Container(
         color: RizColors.surface,
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 14),
         child: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            SizedBox(
-              height: 36,
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                children: [
-                  for (final f in FilterPreset.values)
-                    Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: ChoiceChip(
-                        label: Text(f.label),
-                        selected: f == _filter,
-                        selectedColor: RizColors.violet,
-                        onSelected: _recording ? null : (_) => setState(() => _filter = f),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    key: const Key('duet-import'),
-                    onPressed: _recording ? null : _importTop,
-                    icon: const Icon(Icons.file_upload_outlined),
-                    label: const Text('Import mine'),
-                  ),
-                ),
-                const SizedBox(width: 16),
-                GestureDetector(
-                  key: const Key('duet-record'),
-                  onTap: canRecord ? _record : null,
-                  child: Opacity(
-                    opacity: canRecord ? 1 : 0.35,
-                    child: Container(
-                      width: 68,
-                      height: 68,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white, width: 4),
-                      ),
-                      padding: const EdgeInsets.all(6),
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 200),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFFF3B5C),
-                          borderRadius: BorderRadius.circular(_recording ? 8 : 40),
+            if (hasCamera) ...[
+              SizedBox(
+                height: 36,
+                child: ListView(
+                  scrollDirection: Axis.horizontal,
+                  children: [
+                    for (final f in FilterPreset.values)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: ChoiceChip(
+                          label: Text(f.label),
+                          selected: f == _filter,
+                          selectedColor: RizColors.violet,
+                          onSelected:
+                              _recording ? null : (_) => setState(() => _filter = f),
                         ),
                       ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                _recording ? 'Recording… tap to stop' : 'Tap to record while the reel plays',
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: RizColors.textDim, fontSize: 12),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: _SideAction(
+                      key: const Key('duet-import'),
+                      icon: Icons.file_upload_outlined,
+                      label: 'Import',
+                      onTap: _recording ? null : _importTop,
                     ),
                   ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Text(
-                    _recording ? 'Tap to stop' : 'Record while the reel plays',
-                    style: const TextStyle(color: RizColors.textDim, fontSize: 12),
+                  _RecordButton(
+                    recording: _recording,
+                    onTap: canRecord ? _record : null,
                   ),
+                  Expanded(
+                    child: _SideAction(
+                      icon: Icons.cameraswitch_outlined,
+                      label: 'Flip',
+                      onTap: _recording || _cams.length < 2 ? null : _flipCamera,
+                    ),
+                  ),
+                ],
+              ),
+            ] else ...[
+              const Text(
+                'Add your part on top: pick a video or photo from your phone.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: RizColors.textDim, fontSize: 13),
+              ),
+              const SizedBox(height: 12),
+              Center(
+                child: GradientButton(
+                  key: const Key('duet-import'),
+                  onPressed: _importTop,
+                  icon: Icons.file_upload_outlined,
+                  label: 'Import my video',
                 ),
-              ],
-            ),
+              ),
+            ],
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Icon with a label underneath, used either side of the record button.
+class _SideAction extends StatelessWidget {
+  const _SideAction({super.key, required this.icon, required this.label, this.onTap});
+  final IconData icon;
+  final String label;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onTap != null;
+    return Opacity(
+      opacity: enabled ? 1 : 0.4,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  color: RizColors.surfaceHigh,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: RizColors.outline),
+                ),
+                child: Icon(icon, color: Colors.white),
+              ),
+              const SizedBox(height: 4),
+              Text(label, style: const TextStyle(fontSize: 12)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RecordButton extends StatelessWidget {
+  const _RecordButton({required this.recording, this.onTap});
+  final bool recording;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      key: const Key('duet-record'),
+      onTap: onTap,
+      child: Opacity(
+        opacity: onTap == null ? 0.4 : 1,
+        child: Container(
+          width: 74,
+          height: 74,
+          padding: const EdgeInsets.all(6),
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white, width: 4),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFFFF3B5C).withValues(alpha: 0.45),
+                blurRadius: 18,
+              ),
+            ],
+          ),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            margin: EdgeInsets.all(recording ? 12 : 0),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFF3B5C),
+              borderRadius: BorderRadius.circular(recording ? 6 : 40),
+            ),
+          ),
         ),
       ),
     );
