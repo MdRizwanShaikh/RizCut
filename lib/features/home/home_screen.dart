@@ -170,6 +170,17 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       body: Stack(
         children: [
+          // Soft neon glows in the background, like the logo.
+          const Positioned(
+            top: -120,
+            left: -80,
+            child: _Glow(color: RizColors.magenta, size: 320),
+          ),
+          const Positioned(
+            bottom: -140,
+            right: -100,
+            child: _Glow(color: RizColors.blue, size: 360),
+          ),
           SafeArea(
             child: ListView(
               padding: const EdgeInsets.all(16),
@@ -182,11 +193,14 @@ class _HomeScreenState extends State<HomeScreen> {
                           width: 44, height: 44),
                     ),
                     const SizedBox(width: 12),
-                    Text(
-                      'RizCut',
-                      style: theme.textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.w800,
-                        color: RizColors.text,
+                    ShaderMask(
+                      shaderCallback: (r) => RizColors.brand.createShader(r),
+                      child: Text(
+                        'RizCut',
+                        style: theme.textTheme.headlineSmall?.copyWith(
+                          fontWeight: FontWeight.w900,
+                          color: Colors.white,
+                        ),
                       ),
                     ),
                     const Spacer(),
@@ -212,7 +226,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         icon: Icons.dashboard_customize_outlined,
                         title: 'Layouts',
                         subtitle: 'Split screen',
-                        color: RizColors.accent,
+                        color: const Color(0xFFFFE14D),
                         onTap: () => _layouts(context),
                       ),
                     ),
@@ -223,7 +237,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         icon: Icons.bolt,
                         title: 'Make a Short',
                         subtitle: 'Any video → 9:16',
-                        color: RizColors.accent,
+                        color: RizColors.cyan,
                         onTap: () => _makeShort(context),
                       ),
                     ),
@@ -235,7 +249,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   icon: Icons.splitscreen,
                   title: 'Duet / Reaction',
                   subtitle: 'Reel below, you on top — record or import',
-                  color: RizColors.accent,
+                  color: RizColors.pink,
                   onTap: () => _duet(context),
                 ),
                 const SizedBox(height: 12),
@@ -434,7 +448,7 @@ class _QuickCard extends StatelessWidget {
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: RizColors.outline),
+            border: Border.all(color: color.withValues(alpha: 0.5)),
           ),
           child: Row(
             children: [
@@ -468,8 +482,15 @@ class _NewProjectCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: RizColors.accent,
+        gradient: RizColors.brand,
         borderRadius: BorderRadius.circular(24),
+        boxShadow: [
+          BoxShadow(
+            color: RizColors.magenta.withValues(alpha: 0.35),
+            blurRadius: 30,
+            offset: const Offset(0, 10),
+          ),
+        ],
       ),
       child: Material(
         type: MaterialType.transparency,
@@ -523,14 +544,37 @@ class _Feature extends StatelessWidget {
             width: 52,
             height: 52,
             decoration: BoxDecoration(
-              color: RizColors.surfaceHigh,
+              color: color.withValues(alpha: 0.14),
               borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: color.withValues(alpha: 0.55)),
             ),
-            child: Icon(icon, color: RizColors.text),
+            child: Icon(icon, color: color),
           ),
           const SizedBox(height: 6),
           Text(label, style: const TextStyle(fontSize: 12)),
         ],
+      ),
+    );
+  }
+}
+
+class _Glow extends StatelessWidget {
+  const _Glow({required this.color, required this.size});
+  final Color color;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: RadialGradient(
+            colors: [color.withValues(alpha: 0.35), color.withValues(alpha: 0)],
+          ),
+        ),
       ),
     );
   }

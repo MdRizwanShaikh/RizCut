@@ -5,14 +5,13 @@ import 'project.dart';
 
 const kTextColors = <Color>[
   Color(0xFFFFFFFF),
-  Color(0xFF111111),
+  RizColors.magenta,
+  RizColors.pink,
+  RizColors.violet,
+  RizColors.cyan,
+  RizColors.blue,
   Color(0xFFFFD54F),
-  Color(0xFFFF5252),
-  Color(0xFFFF9800),
-  Color(0xFF4CAF50),
-  Color(0xFF4F8CFF),
-  Color(0xFFFF6FAE),
-  Color(0xFF9C6BFF),
+  Color(0xFF111111),
 ];
 
 /// Bottom sheet to create or edit a [TextOverlay]. Pops the result.

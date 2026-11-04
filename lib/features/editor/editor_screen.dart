@@ -1381,7 +1381,7 @@ class _EditorScreenState extends State<EditorScreen> {
           child: Container(
             foregroundDecoration: selected
                 ? BoxDecoration(
-                    border: Border.all(color: RizColors.accent, width: 2))
+                    border: Border.all(color: const Color(0xFFFFB36B), width: 2))
                 : null,
             child: ClipRect(child: media),
           ),
@@ -1648,12 +1648,12 @@ class _Tool extends StatelessWidget {
             Container(
               width: 44,
               height: 44,
-              // Simple, uniform tools: neutral tile, white icon.
               decoration: BoxDecoration(
-                color: RizColors.surfaceHigh,
+                color: color.withValues(alpha: 0.14),
                 borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: color.withValues(alpha: 0.5)),
               ),
-              child: Icon(icon, color: RizColors.text, size: 22),
+              child: Icon(icon, color: color, size: 22),
             ),
             const SizedBox(height: 4),
             Text(label,
@@ -1748,7 +1748,7 @@ class _TextOnPreview extends StatelessWidget {
             child: Container(
               padding: EdgeInsets.all(pad),
               decoration: BoxDecoration(
-                color: overlay.background ? const Color(0xCC111214) : null,
+                color: overlay.background ? const Color(0xCC07031C) : null,
                 borderRadius: BorderRadius.circular(pad),
                 border: selected
                     ? Border.all(color: RizColors.cyan, width: 1.5)
