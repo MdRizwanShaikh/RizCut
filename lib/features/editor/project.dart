@@ -1,5 +1,6 @@
 import 'dart:ui' show Color, Offset;
 
+import 'audio_track.dart';
 import 'clip_look.dart';
 import 'color_grade.dart';
 import 'layers.dart';
@@ -52,6 +53,7 @@ class VideoClip {
     this.speed = 1,
     this.transitionOut = TransitionType.none,
     this.look = const ClipLook(),
+    this.volume = 1,
   }) : assert(speed > 0);
 
   /// Which [MediaItem] this clip shows.
@@ -65,6 +67,9 @@ class VideoClip {
   /// Rotate / flip / zoom / motion for this clip.
   final ClipLook look;
 
+  /// This clip's own sound level (0 = muted), on top of the project level.
+  final double volume;
+
   Duration get sourceLength => sourceOut - sourceIn;
 
   /// Length of this clip on the output timeline (after speed change).
@@ -77,6 +82,7 @@ class VideoClip {
     double? speed,
     TransitionType? transitionOut,
     ClipLook? look,
+    double? volume,
   }) =>
       VideoClip(
         mediaId: mediaId,
@@ -85,10 +91,12 @@ class VideoClip {
         speed: speed ?? this.speed,
         transitionOut: transitionOut ?? this.transitionOut,
         look: look ?? this.look,
+        volume: volume ?? this.volume,
       );
 
   Map<String, Object?> toJson() => {
         if (!look.isIdentity) 'look': look.toJson(),
+        if (volume != 1) 'vol': volume,
         'media': mediaId,
         'in': sourceIn.inMicroseconds,
         'out': sourceOut.inMicroseconds,
@@ -106,6 +114,7 @@ class VideoClip {
         look: j['look'] == null
             ? const ClipLook()
             : ClipLook.fromJson((j['look'] as Map).cast()),
+        volume: (j['vol'] as num?)?.toDouble() ?? 1,
       );
 }
 
@@ -256,6 +265,7 @@ class Project {
     required this.clips,
     this.media = const [],
     this.layers = const [],
+    this.audio = const [],
     this.mainFrame = FrameRect.full,
     this.mainCover = false,
     this.canvas = CanvasRatio.original,
@@ -292,6 +302,9 @@ class Project {
 
   /// Videos/photos shown over the main track in their own frames.
   final List<Layer> layers;
+
+  /// Voiceovers and sound effects placed on the timeline.
+  final List<AudioClip> audio;
 
   /// Where the main track sits on the canvas (layouts shrink it).
   final FrameRect mainFrame;
@@ -376,6 +389,7 @@ class Project {
     List<VideoClip>? clips,
     List<MediaItem>? media,
     List<Layer>? layers,
+    List<AudioClip>? audio,
     FrameRect? mainFrame,
     bool? mainCover,
     CanvasRatio? canvas,
@@ -390,6 +404,7 @@ class Project {
         clips: clips == null ? this.clips : List.unmodifiable(clips),
         media: media == null ? this.media : List.unmodifiable(media),
         layers: layers == null ? this.layers : List.unmodifiable(layers),
+        audio: audio == null ? this.audio : List.unmodifiable(audio),
         mainFrame: mainFrame ?? this.mainFrame,
         mainCover: mainCover ?? this.mainCover,
         canvas: canvas ?? this.canvas,
@@ -460,6 +475,15 @@ class Project {
   Project updateMedia(MediaItem item) => copyWith(
       media: [for (final m in media) m.id == item.id ? item : m]);
 
+  Project setClipVolume(int index, double v) =>
+      copyWith(clips: [...clips]..[index] = clips[index].copyWith(volume: v));
+
+  Project addAudio(AudioClip a) => copyWith(audio: [...audio, a]);
+
+  Project updateAudio(int i, AudioClip a) => copyWith(audio: [...audio]..[i] = a);
+
+  Project removeAudio(int i) => copyWith(audio: [...audio]..removeAt(i));
+
   Project addLayer(Layer l) => copyWith(layers: [...layers, l]);
 
   Project updateLayer(int i, Layer l) => copyWith(layers: [...layers]..[i] = l);
@@ -526,6 +550,7 @@ class Project {
         'media': [for (final m in media) m.toJson()],
         'canvas': canvas.name,
         if (layers.isNotEmpty) 'layers': [for (final l in layers) l.toJson()],
+        if (audio.isNotEmpty) 'audio': [for (final a in audio) a.toJson()],
         if (!mainFrame.isFull) 'mainFrame': mainFrame.toJson(),
         if (mainCover) 'mainCover': true,
         'bg': background.name,
@@ -548,6 +573,10 @@ class Project {
         layers: List.unmodifiable([
           for (final l in (j['layers'] as List?) ?? const [])
             Layer.fromJson((l as Map).cast()),
+        ]),
+        audio: List.unmodifiable([
+          for (final a in (j['audio'] as List?) ?? const [])
+            AudioClip.fromJson((a as Map).cast()),
         ]),
         mainFrame: j['mainFrame'] == null
             ? FrameRect.full

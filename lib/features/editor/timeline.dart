@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme.dart';
+import 'audio_track.dart';
 import 'project.dart';
 import 'stickers.dart';
 
@@ -27,6 +28,7 @@ class Timeline extends StatefulWidget {
     this.thumbFor,
     this.selectedLayer,
     this.onTapLayer,
+    this.onTapAudio,
   });
 
   final Project project;
@@ -51,6 +53,7 @@ class Timeline extends StatefulWidget {
   final ImageProvider? Function(VideoClip clip)? thumbFor;
   final int? selectedLayer;
   final ValueChanged<int>? onTapLayer;
+  final ValueChanged<int>? onTapAudio;
 
   @override
   State<Timeline> createState() => _TimelineState();
@@ -214,6 +217,20 @@ class _TimelineState extends State<Timeline> {
                       height: _laneHeight * _lanes(p).count.clamp(1, _maxLanes),
                       child: Stack(
                         children: [
+                          for (var k = 0; k < p.audio.length; k++)
+                            Positioned(
+                              left: _px(p.audio[k].start),
+                              width: _px(p.audio[k].length)
+                                  .clamp(24.0, double.infinity),
+                              top: _laneHeight *
+                                  _lanes(p).of[p.texts.length + p.layers.length + k]
+                                      .clamp(0, _maxLanes - 1),
+                              height: _laneHeight - 4,
+                              child: _AudioBar(
+                                clip: p.audio[k],
+                                onTap: () => widget.onTapAudio?.call(k),
+                              ),
+                            ),
                           for (var j = 0; j < p.layers.length; j++)
                             Positioned(
                               left: _px(p.layers[j].start),
@@ -287,6 +304,7 @@ const int _maxLanes = 4;
   final spans = [
     for (final t in p.texts) (t.start, t.end),
     for (final l in p.layers) (l.start, l.end),
+    for (final a in p.audio) (a.start, a.end),
   ];
   final order = [for (var i = 0; i < spans.length; i++) i]
     ..sort((a, b) => spans[a].$1.compareTo(spans[b].$1));
@@ -304,6 +322,42 @@ const int _maxLanes = 4;
     of[i] = lane;
   }
   return (of: of, count: laneEnds.length);
+}
+
+class _AudioBar extends StatelessWidget {
+  const _AudioBar({required this.clip, required this.onTap});
+  final AudioClip clip;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    const c = Color(0xFF3DDC97);
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6),
+        alignment: Alignment.centerLeft,
+        decoration: BoxDecoration(
+          color: c.withValues(alpha: 0.35),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: c),
+        ),
+        child: Row(
+          children: [
+            Icon(clip.kind == AudioKind.voiceover ? Icons.mic : Icons.graphic_eq,
+                size: 14, color: Colors.white),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Text(clip.name.isEmpty ? 'Audio' : clip.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Colors.white, fontSize: 12)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _LayerBar extends StatelessWidget {

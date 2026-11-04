@@ -50,6 +50,7 @@ dependencies:
   package_info_plus: ^10.2.2
   url_launcher: ^6.3.3
   camera: ^0.12.2
+  record: ^7.1.2
 
 dev_dependencies:
   flutter_test:
@@ -75,6 +76,7 @@ flutter:
   assets:
     - assets/branding/icon.png
     - assets/fonts/OFL-Poppins.txt
+    - assets/sfx/
   fonts:
     - family: Poppins
       fonts:

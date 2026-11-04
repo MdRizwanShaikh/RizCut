@@ -10,6 +10,8 @@ import '../../core/theme.dart';
 import '../../services/storage/draft_store.dart';
 import '../export/export_sheet.dart';
 import 'audio_sheet.dart';
+import 'audio_sheets.dart';
+import 'audio_track.dart';
 import 'canvas_sheet.dart';
 import 'color_grade.dart';
 import 'duet_setup.dart';
@@ -76,6 +78,9 @@ class _EditorScreenState extends State<EditorScreen> {
 
   /// One player per video layer (by layer id), separate from main players.
   final _layerPlayers = <String, VideoPlayerController>{};
+
+  /// One player per voiceover / sound effect (by audio clip id).
+  final _audioPlayers = <String, VideoPlayerController>{};
   int? _selectedLayer;
 
   /// Player of the clip under the playhead (null on a photo clip).
@@ -285,6 +290,9 @@ class _EditorScreenState extends State<EditorScreen> {
     for (final c in _layerPlayers.values) {
       c.dispose();
     }
+    for (final c in _audioPlayers.values) {
+      c.dispose();
+    }
     _music?.dispose();
     applyWebVideoFilter(null);
     super.dispose();
@@ -308,6 +316,7 @@ class _EditorScreenState extends State<EditorScreen> {
     }
     _syncMusicSource();
     _syncLayerPlayers();
+    _syncAudioPlayers();
     _loadThumbs();
     if (save) {
       _dirty = true;
@@ -426,9 +435,52 @@ class _EditorScreenState extends State<EditorScreen> {
     }
   }
 
+  /// Creates players for new audio clips and drops removed ones.
+  Future<void> _syncAudioPlayers() async {
+    if (_project == null) return;
+    final ids = {for (final a in p.audio) a.id};
+    for (final id in _audioPlayers.keys.toList()) {
+      if (!ids.contains(id)) _audioPlayers.remove(id)?.dispose();
+    }
+    for (final a in p.audio) {
+      final existing = _audioPlayers[a.id];
+      if (existing != null) {
+        await existing.setVolume(a.volume.clamp(0.0, 1.0));
+        continue;
+      }
+      try {
+        final c = a.isAsset
+            ? VideoPlayerController.asset(a.location)
+            : await (a.isUrl
+                    ? VideoSource.url(a.location)
+                    : VideoSource.file(a.location))
+                .createController();
+        await c.initialize();
+        if (!mounted || _project == null || !p.audio.any((x) => x.id == a.id)) {
+          await c.dispose();
+          continue;
+        }
+        await c.setVolume(a.volume.clamp(0.0, 1.0));
+        _audioPlayers[a.id] = c;
+      } catch (_) {}
+    }
+  }
+
   /// Keeps layer players in step with the playhead.
   void _syncLayers({bool seek = false}) {
     if (_project == null) return;
+    for (final a in p.audio) {
+      final c = _audioPlayers[a.id];
+      if (c == null || !c.value.isInitialized) continue;
+      if (_playing && a.activeAt(_t)) {
+        if (!c.value.isPlaying) {
+          c.seekTo(a.sourceIn + (_t - a.start));
+          c.play();
+        }
+      } else if (c.value.isPlaying) {
+        c.pause();
+      }
+    }
     for (final l in p.layers) {
       final c = _layerPlayers[l.id];
       if (c == null || !c.value.isInitialized) continue;
@@ -513,6 +565,7 @@ class _EditorScreenState extends State<EditorScreen> {
       return;
     }
     _photoTimer?.cancel();
+    await player.setVolume((p.originalVolume * clip.volume).clamp(0.0, 1.0));
     await player.setPlaybackSpeed(clip.speed);
     await player.seekTo(sourcePos);
     if (play && _playing) await player.play();
@@ -543,6 +596,9 @@ class _EditorScreenState extends State<EditorScreen> {
   void _pause() {
     _active?.pause();
     for (final c in _layerPlayers.values) {
+      c.pause();
+    }
+    for (final c in _audioPlayers.values) {
       c.pause();
     }
     _photoTimer?.cancel();
@@ -820,6 +876,86 @@ class _EditorScreenState extends State<EditorScreen> {
     if (ok == true && !identical(edited.clips[index].look, before.clips[index].look)) {
       _apply(edited);
     }
+  }
+
+  // ---------- voiceover / sound effects / clip volume ----------
+
+  Future<void> _voiceover() async {
+    _pause();
+    final start = _t;
+    final take = await showModalBottomSheet<VoiceoverTake>(
+      context: context,
+      isDismissible: false,
+      enableDrag: false,
+      builder: (_) => VoiceoverSheet(
+        onStart: () {
+          // Mute the preview so the mic doesn't pick it up twice.
+          for (final c in _players.values) {
+            c.setVolume(0);
+          }
+          _play();
+        },
+        onStop: () {
+          _pause();
+          _projectChanged(save: false);
+        },
+      ),
+    );
+    if (take == null || !mounted) return;
+    _apply(p.addAudio(AudioClip(
+      id: 'A${DraftStore.newId()}',
+      location: take.path,
+      kind: AudioKind.voiceover,
+      start: start,
+      sourceIn: Duration.zero,
+      sourceOut: take.length,
+      name: 'Voiceover',
+    )));
+    _seek(start);
+  }
+
+  Future<void> _soundEffect() async {
+    _pause();
+    final fx = await showModalBottomSheet<SoundEffect>(
+      context: context,
+      builder: (_) => const SoundEffectsSheet(),
+    );
+    if (fx == null || !mounted) return;
+    _apply(p.addAudio(AudioClip(
+      id: 'A${DraftStore.newId()}',
+      location: fx.asset,
+      isAsset: true,
+      kind: AudioKind.sfx,
+      start: _t,
+      sourceIn: Duration.zero,
+      sourceOut: fx.length,
+      name: fx.label,
+    )));
+  }
+
+  Future<void> _editAudio(int i) async {
+    _pause();
+    final r = await showModalBottomSheet<AudioClipEdit>(
+      context: context,
+      builder: (_) => AudioClipSheet(initial: p.audio[i], playhead: _t),
+    );
+    if (r == null) return;
+    _apply(r.delete ? p.removeAudio(i) : p.updateAudio(i, r.clip!));
+  }
+
+  Future<void> _clipVolume() async {
+    _pause();
+    final i = _activeClip;
+    final m = p.mediaFor(p.clips[i]);
+    if (m == null || m.isImage) {
+      _toast('Photos have no sound. Add music or a voiceover instead');
+      return;
+    }
+    final v = await showModalBottomSheet<double>(
+      context: context,
+      builder: (_) => ClipVolumeSheet(initial: p.clips[i].volume),
+    );
+    if (v != null && v != p.clips[i].volume) _apply(p.setClipVolume(i, v));
   }
 
   Future<void> _canvas() async {
@@ -1159,6 +1295,7 @@ class _EditorScreenState extends State<EditorScreen> {
                         _selectedLayer = null;
                       }),
                       selectedLayer: _selectedLayer,
+                      onTapAudio: _editAudio,
                       onTapLayer: (i) => setState(() {
                         _selectedLayer = i;
                         _selectedText = null;
@@ -1542,6 +1679,9 @@ class _EditorScreenState extends State<EditorScreen> {
               _Tool(icon: Icons.content_cut, label: 'Split', color: RizColors.magenta, onTap: _split),
               _Tool(icon: Icons.speed, label: 'Speed', color: RizColors.cyan, onTap: _speed),
               _Tool(icon: Icons.auto_awesome, label: 'Filters', color: RizColors.violet, onTap: _filters),
+              _Tool(icon: Icons.mic_none, label: 'Voiceover', color: RizColors.cyan, onTap: _voiceover),
+              _Tool(icon: Icons.graphic_eq, label: 'Sound FX', color: RizColors.blue, onTap: _soundEffect),
+              _Tool(icon: Icons.volume_up_outlined, label: 'Volume', color: RizColors.pink, onTap: _clipVolume),
               _Tool(icon: Icons.music_note, label: 'Audio', color: RizColors.blue, onTap: _audio),
               _Tool(
                 icon: textSelected ? Icons.edit : Icons.text_fields,

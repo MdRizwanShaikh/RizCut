@@ -6,6 +6,7 @@ import 'package:ffmpeg_kit_flutter_new_min/ffmpeg_kit.dart';
 import 'package:ffmpeg_kit_flutter_new_min/ffprobe_kit.dart';
 import 'package:ffmpeg_kit_flutter_new_min/return_code.dart';
 import 'package:flutter/painting.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:gal/gal.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
@@ -89,6 +90,23 @@ class _FfmpegExporter implements ProjectExporter {
         ? null
         : MusicInput(path: track.location, volume: track.volume, fade: track.fade);
 
+    // Voiceovers / sound effects: built-in effects are copied out of the
+    // app bundle so FFmpeg can read them.
+    final audioPaths = <String, String>{};
+    for (final a in project.audio) {
+      if (a.isUrl) continue;
+      if (a.isAsset) {
+        final f = File('${dir.path}/rz_${a.location.split('/').last}');
+        if (!await f.exists()) {
+          final data = await rootBundle.load(a.location);
+          await f.writeAsBytes(data.buffer.asUint8List());
+        }
+        audioPaths[a.id] = f.path;
+      } else {
+        audioPaths[a.id] = a.location;
+      }
+    }
+
     final totalMs = project.duration.inMilliseconds;
     String? lastLogs;
     try {
@@ -103,6 +121,7 @@ class _FfmpegExporter implements ProjectExporter {
           settings: settings,
           overlays: overlays,
           music: music,
+          audioPaths: audioPaths,
           encoder: encoder,
         );
         final done = Completer<void>();

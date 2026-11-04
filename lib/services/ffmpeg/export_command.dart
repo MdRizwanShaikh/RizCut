@@ -337,6 +337,7 @@ List<String> buildProjectExportArgs({
   required ExportSettings settings,
   List<OverlayImage> overlays = const [],
   MusicInput? music,
+  Map<String, String> audioPaths = const {},
   VideoEncoder encoder = VideoEncoder.hardware,
 }) {
   final clips = project.clips;
@@ -413,6 +414,7 @@ List<String> buildProjectExportArgs({
       if (m.hasAudio && !m.isImage) ...[
         'asetpts=PTS-STARTPTS',
         atempoChain(c.speed),
+        if (c.volume != 1) 'volume=${_num(c.volume)}',
       ],
       'aresample=44100',
       'aformat=sample_rates=44100:channel_layouts=stereo',
@@ -510,6 +512,22 @@ List<String> buildProjectExportArgs({
     graph.add('[$idx:a]${mf.join(',')}[m]');
     extras.add('m');
   }
+  // Voiceovers / sound effects: own input each, delayed to their start.
+  final audioInputs = <String>[];
+  var audioIdx = overlayBase + overlays.length + (music == null ? 0 : 1);
+  for (var j = 0; j < project.audio.length; j++) {
+    final a = project.audio[j];
+    final path = audioPaths[a.id];
+    if (path == null || a.volume <= 0 || a.start >= project.duration) continue;
+    audioInputs.addAll([
+      '-ss', ffmpegSeconds(a.sourceIn), '-t', ffmpegSeconds(a.length), '-i', path,
+    ]);
+    graph.add('[$audioIdx:a]asetpts=PTS-STARTPTS,aresample=44100,'
+        'aformat=sample_rates=44100:channel_layouts=stereo,'
+        'volume=${_num(a.volume)},adelay=${a.start.inMilliseconds}:all=1[au$j]');
+    extras.add('au$j');
+    audioIdx++;
+  }
   String? audioOut;
   if (useOriginal || extras.isNotEmpty) {
     // The main track's audio sets the length (amix duration=first).
@@ -550,6 +568,7 @@ List<String> buildProjectExportArgs({
     ...inputs,
     for (final o in overlays) ...['-i', o.path],
     if (music != null) ...['-stream_loop', '-1', '-i', music.path],
+    ...audioInputs,
     '-filter_complex', graph.join(';'),
     '-map', '[$last]',
     if (audioOut != null) ...['-map', '[$audioOut]', '-c:a', 'aac', '-b:a', '128k'],
