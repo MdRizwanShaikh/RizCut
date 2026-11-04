@@ -946,28 +946,21 @@ class _EditorScreenState extends State<EditorScreen> {
               clipBehavior: Clip.hardEdge,
               children: [
                 Positioned.fill(
-                  child: _withMotion(
-                    clip,
-                    Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        _background(clip),
-                        _graded(clip, _media(clip, BoxFit.contain)),
-                      ],
-                    ),
-                  ),
-                ),
-                if (tr.amount > 0)
-                  Positioned.fill(
-                    child: IgnorePointer(
-                      child: ColoredBox(
-                        color: (tr.type == TransitionType.fadeWhite
-                                ? Colors.white
-                                : Colors.black)
-                            .withValues(alpha: tr.amount.clamp(0.0, 1.0)),
+                  child: _withTransition(
+                    tr,
+                    box.biggest,
+                    _withMotion(
+                      clip,
+                      Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          _background(clip),
+                          _graded(clip, _media(clip, BoxFit.contain)),
+                        ],
                       ),
                     ),
                   ),
+                ),
                 for (final i in visible)
                   _TextOnPreview(
                     overlay: p.texts[i],
@@ -1049,6 +1042,39 @@ class _EditorScreenState extends State<EditorScreen> {
     }
     if (look.turns != 0) child = RotatedBox(quarterTurns: look.turns, child: child);
     return FittedBox(fit: fit, clipBehavior: Clip.hardEdge, child: child);
+  }
+
+  /// Mirrors the export's transition filters (fade/slide/wipe/zoom).
+  Widget _withTransition(TransitionState tr, Size box, Widget layer) {
+    final s = tr.strength.clamp(0.0, 1.0);
+    if (s <= 0 || tr.type == TransitionType.none) return layer;
+    final fade = tr.type.fadeColor;
+    if (fade != null) {
+      return Stack(fit: StackFit.expand, children: [
+        layer,
+        IgnorePointer(child: ColoredBox(color: Color(fade).withValues(alpha: s))),
+      ]);
+    }
+    final dir = tr.leaving ? -1.0 : 1.0;
+    return switch (tr.type) {
+      TransitionType.slideLeft => Transform.translate(
+          offset: Offset(dir * s * box.width, 0), child: layer),
+      TransitionType.slideUp => Transform.translate(
+          offset: Offset(0, dir * s * box.height), child: layer),
+      TransitionType.zoom => ClipRect(
+          child: Transform.scale(scale: 1 + 0.5 * s, child: layer)),
+      TransitionType.wipe => Stack(fit: StackFit.expand, children: [
+          layer,
+          Positioned(
+            left: tr.leaving ? 0 : (1 - s) * box.width,
+            width: s * box.width,
+            top: 0,
+            bottom: 0,
+            child: const ColoredBox(color: Colors.black),
+          ),
+        ]),
+      _ => layer,
+    };
   }
 
   /// Wraps the clip layer in its Ken Burns motion at the current time.
@@ -1310,6 +1336,43 @@ class _TextOnPreview extends StatelessWidget {
     // Same sizing rule as the exported PNG (font = fraction of frame height).
     final fontSize = overlay.sizeFraction * box.height;
     final pad = fontSize * 0.35;
+    if (overlay.isBand) {
+      return Positioned(
+        left: 0,
+        width: box.width,
+        top: overlay.position.dy * box.height,
+        child: FractionalTranslation(
+          translation: const Offset(0, -0.5),
+          child: GestureDetector(
+            onTap: onTap,
+            onDoubleTap: onDoubleTap,
+            onPanStart: (_) => onMoveStart(),
+            onPanEnd: (_) => onMoveEnd(),
+            onPanUpdate: (d) => onMoved(Offset(
+              0.5,
+              (overlay.position.dy + d.delta.dy / box.height).clamp(0.05, 0.95),
+            )),
+            child: Opacity(
+              opacity: dimmed ? 0.45 : 1,
+              child: Container(
+                width: box.width,
+                padding: EdgeInsets.all(pad),
+                decoration: BoxDecoration(
+                  color: Color(overlay.band!),
+                  border: selected
+                      ? Border.all(color: RizColors.cyan, width: 1.5)
+                      : null,
+                ),
+                child: Text.rich(
+                  overlaySpan(overlay, fontSize),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
     return Positioned(
       left: overlay.position.dx * box.width,
       top: overlay.position.dy * box.height,

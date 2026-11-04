@@ -11,11 +11,32 @@ const kSpeeds = <double>[0.25, 0.5, 1, 1.5, 2, 4];
 enum TransitionType {
   none('None'),
   fadeBlack('Fade black'),
-  fadeWhite('Flash white');
+  fadeWhite('Flash white'),
+  flashPink('Flash pink'),
+  slideLeft('Slide left'),
+  slideUp('Slide up'),
+  wipe('Wipe'),
+  zoom('Zoom');
 
   const TransitionType(this.label);
   final String label;
+
+  /// Colour faded to for fade-style transitions (ARGB), else null.
+  int? get fadeColor => switch (this) {
+        fadeBlack => 0xFF000000,
+        fadeWhite => 0xFFFFFFFF,
+        flashPink => 0xFFFB40FA,
+        _ => null,
+      };
 }
+
+/// Where a transition is at a moment: [strength] 0..1 (1 at the cut),
+/// [leaving] true on the outgoing clip, false on the incoming one.
+typedef TransitionState = ({
+  TransitionType type,
+  double strength,
+  bool leaving,
+});
 
 /// Each side of a transition lasts this long (total = 2x).
 const kTransitionHalf = Duration(milliseconds: 300);
@@ -98,6 +119,7 @@ class TextOverlay {
     this.sizeFraction = 0.07,
     this.background = false,
     this.sticker,
+    this.band,
   });
 
   final String text;
@@ -114,6 +136,11 @@ class TextOverlay {
   /// Index into `kStickers` when this overlay is a sticker instead of text.
   final int? sticker;
 
+  /// Full-width caption band colour (ARGB), like news/meme captions.
+  final int? band;
+
+  bool get isBand => band != null && sticker == null;
+
   bool get isSticker => sticker != null;
 
   bool visibleAt(Duration t) => t >= start && t < end;
@@ -127,6 +154,8 @@ class TextOverlay {
     double? sizeFraction,
     bool? background,
     int? sticker,
+    int? band,
+    bool clearBand = false,
   }) =>
       TextOverlay(
         text: text ?? this.text,
@@ -137,11 +166,13 @@ class TextOverlay {
         sizeFraction: sizeFraction ?? this.sizeFraction,
         background: background ?? this.background,
         sticker: sticker ?? this.sticker,
+        band: clearBand ? null : (band ?? this.band),
       );
 
   Map<String, Object?> toJson() => {
         'text': text,
         if (sticker != null) 'sticker': sticker,
+        if (band != null) 'band': band,
         'start': start.inMicroseconds,
         'end': end.inMicroseconds,
         'color': color.toARGB32(),
@@ -163,6 +194,7 @@ class TextOverlay {
         sizeFraction: (j['size'] as num?)?.toDouble() ?? 0.07,
         background: j['bg'] as bool? ?? false,
         sticker: (j['sticker'] as num?)?.toInt(),
+        band: (j['band'] as num?)?.toInt(),
       );
 }
 
@@ -312,17 +344,19 @@ class Project {
 
   /// Opacity (0..1) of the transition colour at timeline time [t], and which
   /// transition is active. Mirrors the FFmpeg `fade` filters used on export.
-  ({double amount, TransitionType type}) transitionAt(Duration t) {
+  TransitionState transitionAt(Duration t) {
     final half = kTransitionHalf.inMicroseconds;
     var acc = 0;
     for (var i = 0; i < clips.length - 1; i++) {
       acc += clips[i].timelineLength.inMicroseconds;
       final type = clips[i].transitionOut;
       if (type == TransitionType.none) continue;
-      final d = (t.inMicroseconds - acc).abs();
-      if (d < half) return (amount: 1 - d / half, type: type);
+      final delta = t.inMicroseconds - acc;
+      if (delta.abs() < half) {
+        return (type: type, strength: 1 - delta.abs() / half, leaving: delta < 0);
+      }
     }
-    return (amount: 0, type: TransitionType.none);
+    return (type: TransitionType.none, strength: 0.0, leaving: false);
   }
 
   Project copyWith({

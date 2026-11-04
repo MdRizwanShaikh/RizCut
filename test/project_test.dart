@@ -46,9 +46,11 @@ void main() {
     final s = p
         .splitAt(const Duration(seconds: 4))
         .setTransition(0, TransitionType.fadeBlack);
-    expect(s.transitionAt(const Duration(seconds: 4)).amount, closeTo(1, 1e-6));
-    expect(s.transitionAt(const Duration(seconds: 2)).amount, 0);
-    expect(s.transitionAt(const Duration(milliseconds: 4150)).amount,
+    expect(s.transitionAt(const Duration(seconds: 4)).strength, closeTo(1, 1e-6));
+    expect(s.transitionAt(const Duration(seconds: 2)).strength, 0);
+    expect(s.transitionAt(const Duration(milliseconds: 3900)).leaving, isTrue);
+    expect(s.transitionAt(const Duration(milliseconds: 4100)).leaving, isFalse);
+    expect(s.transitionAt(const Duration(milliseconds: 4150)).strength,
         closeTo(0.5, 1e-6));
   });
 

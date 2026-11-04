@@ -15,4 +15,16 @@ void main() {
       }
     });
   });
+
+  testWidgets('caption band spans the frame width', (tester) async {
+    await tester.runAsync(() async {
+      const band = TextOverlay(
+          text: 'Hello', start: Duration.zero, end: Duration(seconds: 1), band: 0xFFFFE14D);
+      final png = await renderTextPng(band, 1280, frameWidth: 720);
+      // PNG IHDR width is bytes 16..19 (big-endian).
+      final w = (png[16] << 24) | (png[17] << 16) | (png[18] << 8) | png[19];
+      expect(w, 720);
+    });
+  });
 }
+

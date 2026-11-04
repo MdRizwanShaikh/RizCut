@@ -6,7 +6,7 @@ import 'stickers.dart';
 /// One span for both the live preview and the exported PNG, so text and
 /// stickers look identical in both.
 TextSpan overlaySpan(TextOverlay o, double fontSize) {
-  final shadows = o.background
+  final shadows = o.background || o.isBand
       ? null
       : [
           Shadow(
@@ -35,7 +35,7 @@ TextSpan overlaySpan(TextOverlay o, double fontSize) {
       color: o.color,
       fontFamily: 'Inter',
       fontSize: fontSize,
-      fontWeight: FontWeight.w800,
+      fontWeight: o.isBand ? FontWeight.w900 : FontWeight.w800,
       height: 1.15,
       shadows: shadows,
     ),

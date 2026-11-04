@@ -114,12 +114,24 @@ class _TextEditorSheetState extends State<TextEditorSheet> {
               ),
             ],
           ),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Background box'),
-            value: _t.background,
-            activeThumbColor: RizColors.magenta,
-            onChanged: (v) => setState(() => _t = _t.copyWith(background: v)),
+          const Text('Style', style: TextStyle(color: RizColors.textDim)),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final st in _TextLook.values)
+                ChoiceChip(
+                  key: Key('text-style-${st.name}'),
+                  avatar: st.band == null
+                      ? null
+                      : CircleAvatar(backgroundColor: Color(st.band!), radius: 7),
+                  label: Text(st.label),
+                  selected: _TextLook.of(_t) == st,
+                  selectedColor: RizColors.violet,
+                  onSelected: (_) => setState(() => _t = st.applyTo(_t)),
+                ),
+            ],
           ),
           const SizedBox(height: 8),
           Align(
@@ -133,6 +145,42 @@ class _TextEditorSheetState extends State<TextEditorSheet> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Text looks offered in the sheet. Bands are full-width caption bars.
+enum _TextLook {
+  plain('Plain', null),
+  box('Box', null),
+  yellowBand('Yellow band', 0xFFFFE14D),
+  whiteBand('White band', 0xFFFFFFFF),
+  blackBand('Black band', 0xFF000000),
+  pinkBand('Pink band', 0xFFFB40FA);
+
+  const _TextLook(this.label, this.band);
+  final String label;
+  final int? band;
+
+  static _TextLook of(TextOverlay t) {
+    if (t.band != null) {
+      return _TextLook.values.firstWhere((l) => l.band == t.band,
+          orElse: () => _TextLook.yellowBand);
+    }
+    return t.background ? box : plain;
+  }
+
+  TextOverlay applyTo(TextOverlay t) {
+    if (band == null) {
+      return t.copyWith(background: this == box, clearBand: true);
+    }
+    // Readable text on the band: dark on light bands, white on dark ones.
+    final light = band == 0xFFFFE14D || band == 0xFFFFFFFF;
+    return t.copyWith(
+      band: band,
+      background: false,
+      color: light ? const Color(0xFF111111) : const Color(0xFFFFFFFF),
+      position: Offset(0.5, t.position.dy),
     );
   }
 }

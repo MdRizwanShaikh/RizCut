@@ -68,13 +68,14 @@ class _FfmpegExporter implements ProjectExporter {
       final t = project.texts[i];
       if (!t.isSticker && t.text.trim().isEmpty) continue;
       final file = File('${dir.path}/rz_text_${stamp}_$i.png');
-      await file.writeAsBytes(await renderTextPng(t, out.height.toDouble()));
+      await file.writeAsBytes(await renderTextPng(t, out.height.toDouble(),
+          frameWidth: out.width.toDouble()));
       temp.add(file);
       overlays.add(OverlayImage(
         path: file.path,
         start: t.start,
         end: t.end,
-        centerX: t.position.dx,
+        centerX: t.isBand ? 0.5 : t.position.dx,
         centerY: t.position.dy,
       ));
     }
@@ -190,27 +191,29 @@ class _FfmpegExporter implements ProjectExporter {
 }
 
 /// Draws [t] into a transparent PNG sized for a frame of [frameHeight] px.
-Future<List<int>> renderTextPng(TextOverlay t, double frameHeight) async {
+/// Caption bands span the whole [frameWidth].
+Future<List<int>> renderTextPng(TextOverlay t, double frameHeight,
+    {double? frameWidth}) async {
   final fontSize = t.sizeFraction * frameHeight;
+  final pad = fontSize * 0.35;
+  final bandW = t.isBand ? (frameWidth ?? frameHeight * 9 / 16) : null;
   final painter = TextPainter(
     text: overlaySpan(t, fontSize),
     textAlign: TextAlign.center,
     textDirection: TextDirection.ltr,
-  )..layout();
-  final pad = fontSize * 0.35;
-  final w = (painter.width + pad * 2).ceil();
+  )..layout(maxWidth: bandW == null ? double.infinity : bandW - pad * 2);
+  final w = bandW?.ceil() ?? (painter.width + pad * 2).ceil();
   final h = (painter.height + pad * 2).ceil();
   final recorder = ui.PictureRecorder();
   final canvas = Canvas(recorder);
-  if (t.background) {
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-          Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble()),
-          Radius.circular(pad)),
-      Paint()..color = const Color(0xCC07031C),
-    );
+  final rect = Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble());
+  if (t.isBand) {
+    canvas.drawRect(rect, Paint()..color = Color(t.band!));
+  } else if (t.background) {
+    canvas.drawRRect(RRect.fromRectAndRadius(rect, Radius.circular(pad)),
+        Paint()..color = const Color(0xCC07031C));
   }
-  painter.paint(canvas, Offset(pad, pad));
+  painter.paint(canvas, Offset((w - painter.width) / 2, pad));
   final image = await recorder.endRecording().toImage(w, h);
   final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
   return bytes!.buffer.asUint8List();

@@ -194,20 +194,81 @@ List<String> lookFilters(ClipLook look) {
 
 /// Ken Burns motion over the whole canvas frame with `zoompan`.
 /// [frames] is the clip length in frames.
-String? motionFilter(Motion motion, int w, int h, int fps, int frames) {
-  if (motion == Motion.none) return null;
+String? motionFilter(Motion motion, int w, int h, int fps, int frames) =>
+    zoomPanFilter(motion, w, h, fps, frames);
+
+/// `zoompan` for a clip's motion and/or "Zoom" transitions. [inFrames] /
+/// [outFrames] are the zoom-transition lengths at the start / end (0 = none).
+String? zoomPanFilter(Motion motion, int w, int h, int fps, int frames,
+    {int inFrames = 0, int outFrames = 0}) {
+  if (motion == Motion.none && inFrames == 0 && outFrames == 0) return null;
   final n = frames <= 1 ? 1 : frames - 1;
   final k = (kMotionZoom - 1).toStringAsFixed(4);
   final kz = kMotionZoom.toStringAsFixed(4);
   const cx = '(iw-iw/zoom)/2', cy = '(ih-ih/zoom)/2';
-  final (z, x, y) = switch (motion) {
+  var (z, x, y) = switch (motion) {
     Motion.zoomIn => ("1+$k*on/$n", cx, cy),
     Motion.zoomOut => ("$kz-$k*on/$n", cx, cy),
     Motion.panLeft => (kz, '(iw-iw/zoom)*(1-on/$n)', cy),
     Motion.panRight => (kz, '(iw-iw/zoom)*on/$n', cy),
-    Motion.none => ('1', '0', '0'),
+    Motion.none => ('1', cx, cy),
   };
+  final punch = <String>[
+    if (inFrames > 0) 'if(lt(on,$inFrames),1-on/$inFrames,0)',
+    if (outFrames > 0)
+      'if(gt(on,${n - outFrames}),(on-${n - outFrames})/$outFrames,0)',
+  ];
+  if (punch.isNotEmpty) z = '($z)*(1+0.5*(${punch.join('+')}))';
   return "zoompan=z='$z':x='$x':y='$y':d=1:s=${w}x$h:fps=$fps";
+}
+
+/// Slide / wipe transitions for one clip as extra graph lines turning
+/// [inLabel] into [outLabel]. Empty when the clip has neither.
+List<String> slideWipeFilters(String inLabel, String outLabel, int w, int h,
+    int fps, double len, double d, TransitionType inType, TransitionType outType) {
+  final dS = d.toStringAsFixed(3);
+  final tail = (len - d).toStringAsFixed(3);
+  final lenS = len.toStringAsFixed(3);
+  String slide(TransitionType t, String axis) {
+    final terms = <String>[
+      if (inType == t) 'if(lt(t,$dS),$axis*(1-t/$dS),0)',
+      if (outType == t) 'if(gt(t,$tail),-$axis*(t-$tail)/$dS,0)',
+    ];
+    return terms.isEmpty ? '0' : terms.join('+');
+  }
+  final slides = inType == TransitionType.slideLeft ||
+      inType == TransitionType.slideUp ||
+      outType == TransitionType.slideLeft ||
+      outType == TransitionType.slideUp;
+  final wipes = inType == TransitionType.wipe || outType == TransitionType.wipe;
+  if (!slides && !wipes) return const [];
+  final lines = <String>[];
+  var cur = inLabel;
+  if (slides) {
+    final next = wipes ? '${outLabel}s' : outLabel;
+    lines.add('color=c=black:s=${w}x$h:r=$fps:d=$lenS[${outLabel}k]');
+    lines.add("[${outLabel}k][$cur]overlay="
+        "x='${slide(TransitionType.slideLeft, 'main_w')}':"
+        "y='${slide(TransitionType.slideUp, 'main_h')}':"
+        'eval=frame:shortest=1,format=yuv420p[$next]');
+    cur = next;
+  }
+  if (wipes) {
+    final inX = inType == TransitionType.wipe ? 'main_w*t/$dS' : null;
+    final outX = outType == TransitionType.wipe
+        ? '-main_w+main_w*(t-$tail)/$dS'
+        : null;
+    final x = switch ((inX, outX)) {
+      (final i?, final o?) => 'if(lt(t,$dS),$i,if(gt(t,$tail),$o,main_w))',
+      (final i?, null) => 'if(lt(t,$dS),$i,main_w)',
+      (null, final o?) => 'if(gt(t,$tail),$o,main_w)',
+      _ => 'main_w',
+    };
+    lines.add('color=c=black:s=${w}x$h:r=$fps:d=$lenS[${outLabel}w]');
+    lines.add("[$cur][${outLabel}w]overlay=x='$x':y=0:eval=frame,"
+        'format=yuv420p[$outLabel]');
+  }
+  return lines;
 }
 
 /// Fits a clip into the W x H canvas over a blurred copy or a solid colour.
@@ -277,25 +338,33 @@ List<String> buildProjectExportArgs({
     final inType = i > 0 ? clips[i - 1].transitionOut : TransitionType.none;
     final outType = i < clips.length - 1 ? c.transitionOut : TransitionType.none;
     String color(TransitionType t) =>
-        t == TransitionType.fadeWhite ? 'white' : 'black';
+        '0x${(t.fadeColor! & 0xFFFFFF).toRadixString(16).padLeft(6, '0')}';
+    final frames = (len * fps).round();
+    final dFrames = (d * fps).round();
 
     final look = lookFilters(c.look);
     graph.add('[$i:v]setpts=(PTS-STARTPTS)/$speed,fps=$fps,'
         '${look.isEmpty ? '' : '${look.join(',')},'}format=yuv420p[r$i]');
     graph.addAll(_fitToCanvas('r$i', 'c$i', width, height, project.background));
-    final motion = motionFilter(
-        c.look.motion, width, height, fps, (len * fps).round());
+    final motion = zoomPanFilter(
+      c.look.motion, width, height, fps, frames,
+      inFrames: inType == TransitionType.zoom ? dFrames : 0,
+      outFrames: outType == TransitionType.zoom ? dFrames : 0,
+    );
     final v = <String>[
       ?motion,
       if (grade.isNotEmpty) grade,
-      if (inType != TransitionType.none)
+      if (inType.fadeColor != null)
         'fade=t=in:st=0:d=${d.toStringAsFixed(3)}:color=${color(inType)}',
-      if (outType != TransitionType.none)
+      if (outType.fadeColor != null)
         'fade=t=out:st=${(len - d).toStringAsFixed(3)}:'
             'd=${d.toStringAsFixed(3)}:color=${color(outType)}',
       'format=yuv420p',
     ];
-    graph.add('[c$i]${v.join(',')}[v$i]');
+    final moves = slideWipeFilters(
+        'g$i', 'v$i', width, height, fps, len, d, inType, outType);
+    graph.add('[c$i]${v.join(',')}[${moves.isEmpty ? 'v$i' : 'g$i'}]');
+    graph.addAll(moves);
     concatInputs.write('[v$i]');
 
     final au = <String>[

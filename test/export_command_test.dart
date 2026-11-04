@@ -103,8 +103,8 @@ void main() {
     final g = graphOf(args);
     expect(g, contains('colorchannelmixer=rr=1.0800'));
     expect(g, contains("lutrgb=r='clip(val+0.0150*maxval,minval,maxval)'"));
-    expect(g, contains('fade=t=out:st=1.700:d=0.300:color=white'));
-    expect(g, contains('fade=t=in:st=0:d=0.300:color=white'));
+    expect(g, contains('fade=t=out:st=1.700:d=0.300:color=0xffffff'));
+    expect(g, contains('fade=t=in:st=0:d=0.300:color=0xffffff'));
     expect(g, contains('[ac]volume=0.5[ao]'));
     expect(g, contains('[2:a]aresample=44100'));
     expect(g, contains('[ao][m]amix=inputs=2:duration=first:normalize=0[am]'));
