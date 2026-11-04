@@ -30,6 +30,10 @@ class _ExportSheetState extends State<ExportSheet> {
   final _exporter = ProjectExporter();
   ExportResolution _resolution = ExportResolution.p720;
   int _fps = 30;
+  ExportQuality _quality = ExportQuality.standard;
+
+  ExportSettings get _settings =>
+      ExportSettings(resolution: _resolution, fps: _fps, quality: _quality);
   _Stage _stage = _Stage.choose;
   double _progress = 0;
   String? _output;
@@ -44,7 +48,7 @@ class _ExportSheetState extends State<ExportSheet> {
       final out = await _exporter.export(
         project: widget.project,
         previewSize: widget.previewSize,
-        settings: ExportSettings(resolution: _resolution, fps: _fps),
+        settings: _settings,
         onProgress: (p) {
           if (mounted) setState(() => _progress = p);
         },
@@ -88,25 +92,49 @@ class _ExportSheetState extends State<ExportSheet> {
                 const SizedBox(height: 16),
                 const Text('Resolution'),
                 const SizedBox(height: 8),
-                SegmentedButton<ExportResolution>(
-                  segments: [
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
                     for (final r in ExportResolution.values)
-                      ButtonSegment(value: r, label: Text(r.label)),
+                      ChoiceChip(
+                        key: Key('res-${r.name}'),
+                        label: Text(r.label),
+                        selected: r == _resolution,
+                        selectedColor: RizColors.violet,
+                        onSelected: (_) => setState(() => _resolution = r),
+                      ),
                   ],
-                  selected: {_resolution},
-                  onSelectionChanged: (s) =>
-                      setState(() => _resolution = s.first),
                 ),
                 const SizedBox(height: 16),
                 const Text('Frame rate'),
                 const SizedBox(height: 8),
                 SegmentedButton<int>(
                   segments: const [
+                    ButtonSegment(value: 24, label: Text('24 fps')),
                     ButtonSegment(value: 30, label: Text('30 fps')),
                     ButtonSegment(value: 60, label: Text('60 fps')),
                   ],
                   selected: {_fps},
                   onSelectionChanged: (s) => setState(() => _fps = s.first),
+                ),
+                const SizedBox(height: 16),
+                const Text('Quality (bitrate)'),
+                const SizedBox(height: 8),
+                SegmentedButton<ExportQuality>(
+                  segments: [
+                    for (final q in ExportQuality.values)
+                      ButtonSegment(value: q, label: Text(q.label)),
+                  ],
+                  selected: {_quality},
+                  onSelectionChanged: (s) => setState(() => _quality = s.first),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  '${_settings.videoBitrateKbps ~/ 1000}.${(_settings.videoBitrateKbps % 1000) ~/ 100} Mbps · '
+                  'about ${_settings.estimatedMegabytes(widget.project.duration).toStringAsFixed(_settings.estimatedMegabytes(widget.project.duration) < 10 ? 1 : 0)} MB'
+                  '${_resolution.shortSide > 1080 ? ' · 2K/4K needs a 2K/4K source to look sharper' : ''}',
+                  style: const TextStyle(color: RizColors.textDim, fontSize: 12),
                 ),
                 if (!_exporter.supported) ...[
                   const SizedBox(height: 16),

@@ -12,7 +12,9 @@ import '../../features/editor/project.dart';
 enum ExportResolution {
   p480(480, 2500),
   p720(720, 5000),
-  p1080(1080, 10000);
+  p1080(1080, 10000),
+  p1440(1440, 16000),
+  p2160(2160, 35000);
 
   const ExportResolution(this.shortSide, this.videoBitrateKbps);
 
@@ -20,7 +22,25 @@ enum ExportResolution {
   final int shortSide;
   final int videoBitrateKbps;
 
-  String get label => '${shortSide}p';
+  String get label => switch (this) {
+        p1440 => '2K',
+        p2160 => '4K',
+        _ => '${shortSide}p',
+      };
+}
+
+/// Bitrate level (VN-style granular export control).
+enum ExportQuality {
+  low('Smaller file', 0.6, 6),
+  standard('Recommended', 1.0, 3),
+  high('Best quality', 1.6, 2);
+
+  const ExportQuality(this.label, this.bitrateFactor, this.mpeg4Q);
+  final String label;
+  final double bitrateFactor;
+
+  /// `-q:v` for the software encoder (lower = better).
+  final int mpeg4Q;
 }
 
 enum VideoEncoder {
@@ -38,10 +58,23 @@ class ExportSettings {
   const ExportSettings({
     this.resolution = ExportResolution.p720,
     this.fps = 30,
-  }) : assert(fps == 30 || fps == 60);
+    this.quality = ExportQuality.standard,
+  }) : assert(fps == 24 || fps == 30 || fps == 60);
 
   final ExportResolution resolution;
   final int fps;
+  final ExportQuality quality;
+
+  /// Video bitrate in kbps: resolution base x quality, +40% at 60 fps.
+  int get videoBitrateKbps =>
+      (resolution.videoBitrateKbps *
+              quality.bitrateFactor *
+              (fps == 60 ? 1.4 : fps == 24 ? 0.85 : 1.0))
+          .round();
+
+  /// Rough output size for [duration] (video + 128 kbps audio), in MB.
+  double estimatedMegabytes(Duration duration) =>
+      (videoBitrateKbps + 128) * duration.inMilliseconds / 1000 / 8 / 1000;
 }
 
 /// Output frame size: short side = [shortSide], aspect kept, even numbers.
@@ -504,11 +537,11 @@ List<String> buildProjectExportArgs({
   final videoCodecArgs = switch (encoder) {
     VideoEncoder.hardware => [
         '-c:v', encoder.codec,
-        '-b:v', '${settings.resolution.videoBitrateKbps}k',
+        '-b:v', '${settings.videoBitrateKbps}k',
       ],
     VideoEncoder.software => [
         '-c:v', encoder.codec,
-        '-q:v', '3',
+        '-q:v', '${settings.quality.mpeg4Q}',
       ],
   };
 

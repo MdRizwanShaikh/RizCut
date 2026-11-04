@@ -145,4 +145,22 @@ void main() {
     expect(coeffs.every((c) => c.abs() <= 2), isTrue);
     expect('colorchannelmixer'.allMatches(g).length, greaterThan(1));
   });
+
+  test('bitrate follows resolution, quality and fps; size estimate', () {
+    const s1 = ExportSettings(resolution: ExportResolution.p1080);
+    expect(s1.videoBitrateKbps, 10000);
+    const s2 = ExportSettings(
+        resolution: ExportResolution.p1080, quality: ExportQuality.high, fps: 60);
+    expect(s2.videoBitrateKbps, (10000 * 1.6 * 1.4).round());
+    expect(ExportResolution.p2160.label, '4K');
+    // 10 Mbps + audio for 8 s ≈ 10.1 MB
+    expect(s1.estimatedMegabytes(const Duration(seconds: 8)), closeTo(10.128, 0.01));
+    final args = buildProjectExportArgs(
+      output: 'o', project: const Project(clips: clips), media: _media,
+      width: 720, height: 1280,
+      settings: const ExportSettings(quality: ExportQuality.low),
+      encoder: VideoEncoder.software);
+    expect(args[args.indexOf('-q:v') + 1], '6');
+  });
 }
+
