@@ -33,4 +33,12 @@ void main() {
         contains("x='(iw-iw/zoom)*(1-on/60)'"));
     expect(motionFilter(Motion.none, 720, 1280, 30, 61), isNull);
   });
+
+  test('stabilize adds deshake first and is saved', () {
+    const l = ClipLook(stabilize: true, flipH: true);
+    expect(lookFilters(l), ['deshake', 'hflip']);
+    expect(ClipLook.fromJson(l.toJson()).stabilize, isTrue);
+    expect(l.isIdentity, isFalse);
+  });
 }
+

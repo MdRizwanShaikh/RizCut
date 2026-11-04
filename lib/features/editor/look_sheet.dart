@@ -110,6 +110,17 @@ class _LookSheetState extends State<LookSheet> {
                 onChanged: (v) => _set(_l.copyWith(panY: v)),
               ),
             ],
+            if (!widget.isPhoto)
+              SwitchListTile(
+                key: const Key('look-stabilize'),
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Stabilize'),
+                subtitle: const Text('Smooths shaky footage when you export',
+                    style: TextStyle(color: RizColors.textDim, fontSize: 12)),
+                value: _l.stabilize,
+                activeThumbColor: RizColors.magenta,
+                onChanged: (v) => _set(_l.copyWith(stabilize: v)),
+              ),
             const SizedBox(height: 6),
             Text(
               widget.isPhoto ? 'Motion (Ken Burns)' : 'Motion',

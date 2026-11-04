@@ -18,6 +18,7 @@ import 'duet_setup.dart';
 import 'clip_look.dart';
 import 'look_sheet.dart';
 import 'filter_sheet.dart';
+import '../../services/ffmpeg/media_tools.dart';
 import '../../services/thumbs/thumbnailer.dart';
 import 'chroma_preview.dart';
 import 'image_provider.dart';
@@ -964,6 +965,118 @@ class _EditorScreenState extends State<EditorScreen> {
     if (v != null && v != p.clips[i].volume) _apply(p.setClipVolume(i, v));
   }
 
+  // ---------- reverse / freeze frame ----------
+
+  /// Runs [work] while a small "working" sheet blocks the editor.
+  Future<T?> _busy<T>(String label, Future<T> Function() work) async {
+    final nav = Navigator.of(context);
+    showModalBottomSheet<void>(
+      context: context,
+      isDismissible: false,
+      enableDrag: false,
+      builder: (_) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Row(
+            children: [
+              const SizedBox(
+                  width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5)),
+              const SizedBox(width: 16),
+              Text(label),
+            ],
+          ),
+        ),
+      ),
+    );
+    try {
+      return await work();
+    } finally {
+      if (mounted) nav.pop();
+    }
+  }
+
+  Future<void> _reverse() async {
+    _pause();
+    final i = _activeClip;
+    final c = p.clips[i];
+    final m = p.mediaFor(c);
+    if (!MediaTools.supported || m == null || m.source.isUrl) {
+      _toast('Reverse works on videos from your phone in the Android app');
+      return;
+    }
+    if (m.isImage) {
+      _toast('Photos cannot be reversed');
+      return;
+    }
+    if (c.sourceLength > kMaxReverseLength) {
+      _toast('Split the clip to 30 seconds or less first');
+      return;
+    }
+    final path = await _busy('Reversing clip…',
+        () => MediaTools.reverse(m.source.location, c.sourceIn, c.sourceLength));
+    if (path == null || !mounted) {
+      if (mounted) _toast('Could not reverse this clip');
+      return;
+    }
+    final item = (await _loadNewMedia([
+      (VideoSource.file(path, name: 'Reversed ${m.source.name}'), MediaKind.video),
+    ])).first;
+    if (!mounted) return;
+    _apply(p.copyWith(
+      media: [...p.media, item],
+      clips: [...p.clips]
+        ..[i] = VideoClip(
+          mediaId: item.id,
+          sourceIn: Duration.zero,
+          sourceOut: item.duration > Duration.zero ? item.duration : c.sourceLength,
+          speed: c.speed,
+          transitionOut: c.transitionOut,
+          look: c.look,
+          volume: c.volume,
+        ),
+    ));
+    _toast('Clip reversed');
+  }
+
+  Future<void> _freezeFrame() async {
+    _pause();
+    final hit = p.hitTest(_t);
+    if (hit == null) return;
+    final c = p.clips[hit.index];
+    final m = p.mediaFor(c);
+    if (!MediaTools.supported || m == null || m.source.isUrl || m.isImage) {
+      _toast('Freeze frame works on videos from your phone in the Android app');
+      return;
+    }
+    final path = await _busy('Grabbing frame…',
+        () => MediaTools.frame(m.source.location, hit.sourcePosition));
+    if (path == null || !mounted) {
+      if (mounted) _toast('Could not grab this frame');
+      return;
+    }
+    final item = (await _loadNewMedia([
+      (VideoSource.file(path, name: 'Freeze frame.jpg'), MediaKind.image),
+    ])).first;
+    if (!mounted) return;
+    // Split at the playhead (if inside the clip) and put the still in between.
+    var next = p.splitAt(_t);
+    final insertAt = identical(next, p)
+        ? (hit.offsetInClip < c.timelineLength ~/ 2 ? hit.index : hit.index + 1)
+        : hit.index + 1;
+    next = next.copyWith(
+      media: [...next.media, item],
+      clips: [...next.clips]
+        ..insert(insertAt, VideoClip(
+          mediaId: item.id,
+          sourceIn: Duration.zero,
+          sourceOut: const Duration(seconds: 2),
+        )),
+    );
+    _apply(next);
+    _seek(next.clipStart(insertAt));
+    _toast('Freeze frame added (2 s)');
+  }
+
   Future<void> _canvas() async {
     _pause();
     final before = p;
@@ -1790,6 +1903,8 @@ class _EditorScreenState extends State<EditorScreen> {
               _Tool(icon: Icons.aspect_ratio, label: 'Canvas', color: const Color(0xFFFFB36B), onTap: _canvas),
               _Tool(icon: Icons.crop_rotate, label: 'Edit', color: const Color(0xFF9DFF6B), onTap: _editLook),
               _Tool(icon: Icons.content_cut, label: 'Split', color: RizColors.magenta, onTap: _split),
+              _Tool(icon: Icons.history, label: 'Reverse', color: RizColors.violet, onTap: _reverse),
+              _Tool(icon: Icons.ac_unit, label: 'Freeze', color: RizColors.cyan, onTap: _freezeFrame),
               _Tool(icon: Icons.speed, label: 'Speed', color: RizColors.cyan, onTap: _speed),
               _Tool(icon: Icons.auto_awesome, label: 'Filters', color: RizColors.violet, onTap: _filters),
               _Tool(icon: Icons.mic_none, label: 'Voiceover', color: RizColors.cyan, onTap: _voiceover),

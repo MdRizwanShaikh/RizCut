@@ -25,6 +25,7 @@ class ClipLook {
     this.panX = 0,
     this.panY = 0,
     this.motion = Motion.none,
+    this.stabilize = false,
   });
 
   /// Clockwise quarter turns (0..3).
@@ -38,8 +39,16 @@ class ClipLook {
   final double panX, panY;
   final Motion motion;
 
+  /// Smooth out camera shake on export (FFmpeg deshake).
+  final bool stabilize;
+
   bool get isIdentity =>
-      turns == 0 && !flipH && !flipV && zoom == 1 && motion == Motion.none;
+      turns == 0 &&
+      !flipH &&
+      !flipV &&
+      zoom == 1 &&
+      motion == Motion.none &&
+      !stabilize;
 
   /// Swaps width/height after rotation.
   bool get swapsSides => turns.isOdd;
@@ -64,6 +73,7 @@ class ClipLook {
     double? panX,
     double? panY,
     Motion? motion,
+    bool? stabilize,
   }) =>
       ClipLook(
         turns: (turns ?? this.turns) % 4,
@@ -73,6 +83,7 @@ class ClipLook {
         panX: panX ?? this.panX,
         panY: panY ?? this.panY,
         motion: motion ?? this.motion,
+        stabilize: stabilize ?? this.stabilize,
       );
 
   Map<String, Object?> toJson() => {
@@ -83,6 +94,7 @@ class ClipLook {
         if (panX != 0) 'px': panX,
         if (panY != 0) 'py': panY,
         if (motion != Motion.none) 'm': motion.name,
+        if (stabilize) 'st': true,
       };
 
   factory ClipLook.fromJson(Map<String, Object?> j) => ClipLook(
@@ -93,5 +105,6 @@ class ClipLook {
         panX: (j['px'] as num?)?.toDouble() ?? 0,
         panY: (j['py'] as num?)?.toDouble() ?? 0,
         motion: Motion.values.asNameMap()[j['m']] ?? Motion.none,
+        stabilize: j['st'] as bool? ?? false,
       );
 }

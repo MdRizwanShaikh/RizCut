@@ -248,6 +248,7 @@ class ExportMedia {
 List<String> lookFilters(ClipLook look) {
   String f(double v) => v.toStringAsFixed(4);
   return [
+    if (look.stabilize) 'deshake',
     if (look.zoom > 1.0001)
       'crop=iw/${f(look.zoom)}:ih/${f(look.zoom)}:'
           '(iw-ow)*${f((look.panX + 1) / 2)}:(ih-oh)*${f((look.panY + 1) / 2)}',
