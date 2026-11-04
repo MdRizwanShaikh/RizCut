@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../../core/theme.dart';
+import '../../services/share/share_intake.dart';
 import '../../services/storage/draft_store.dart';
 import '../editor/editor_screen.dart';
 import '../editor/layer_sheet.dart';
@@ -27,6 +28,14 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _reload();
+    ShareIntake.instance.listen((paths) {
+      if (!mounted) return;
+      final sources = [
+        for (final p in paths)
+          VideoSource.file(p, name: p.split('/').last.replaceFirst(RegExp(r'^\d+_'), '')),
+      ];
+      _open(context, sources.first, extra: sources.skip(1).toList());
+    });
   }
 
   Future<void> _reload() async {
