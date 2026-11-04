@@ -11,6 +11,8 @@ import '../../services/storage/draft_store.dart';
 import '../export/export_sheet.dart';
 import 'audio_sheet.dart';
 import 'canvas_sheet.dart';
+import 'color_grade.dart';
+import 'duet_setup.dart';
 import 'clip_look.dart';
 import 'look_sheet.dart';
 import 'filter_sheet.dart';
@@ -44,6 +46,7 @@ class EditorScreen extends StatefulWidget {
     this.extra = const [],
     this.layout,
     this.short,
+    this.duet,
   });
   final VideoSource source;
 
@@ -52,6 +55,10 @@ class EditorScreen extends StatefulWidget {
 
   /// Start a 9:16 Short cut from [source].
   final ShortOptions? short;
+
+  /// Finish a duet: top part gets [DuetSetup.grade], the reel keeps its
+  /// own look and plays with [DuetSetup.reelVolume].
+  final DuetSetup? duet;
 
   /// More files picked together with [source]; appended as clips.
   final List<VideoSource> extra;
@@ -156,6 +163,18 @@ class _EditorScreenState extends State<EditorScreen> {
         ));
         if (!mounted) return;
         project = Project.fromLayout(widget.layout!, loaded.media);
+        final duet = widget.duet;
+        if (duet != null && project.layers.isNotEmpty) {
+          project = project
+              .copyWith(grade: duet.grade)
+              .updateLayer(
+                0,
+                project.layers.first.copyWith(
+                  volume: duet.reelVolume,
+                  grade: const ColorGrade(),
+                ),
+              );
+        }
         setState(() => _project = project);
         await _syncLayerPlayers();
         _enterClip(0, p.clips.first.sourceIn);
@@ -1321,9 +1340,10 @@ class _EditorScreenState extends State<EditorScreen> {
     } else {
       media = const ColoredBox(color: RizColors.surfaceHigh);
     }
-    if (!p.grade.isIdentity && !(kIsWeb && player != null)) {
+    final lg = l.grade ?? p.grade;
+    if (!lg.isIdentity && !(kIsWeb && player != null)) {
       media = ColorFiltered(
-          colorFilter: ColorFilter.matrix(p.grade.flutterMatrix), child: media);
+          colorFilter: ColorFilter.matrix(lg.flutterMatrix), child: media);
     }
     final selected = i == _selectedLayer;
     return Positioned(

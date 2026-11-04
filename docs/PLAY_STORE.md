@@ -111,6 +111,7 @@ With login:
   - *App activity → Other user-generated content* (project edit data in backups) — collected,
     optional, purpose **App functionality**.
 - Photos/videos: **not collected** (editing happens on device; nothing is uploaded).
+- Camera / microphone (Duet recording): used on device only → **not collected**.
 - **Account deletion URL** (asked when the app has accounts): the privacy policy URL (it has a
   "Deleting your data" section).
 
@@ -133,11 +134,19 @@ EDIT
 • Rotate, flip and zoom-crop any clip
 • Ken Burns motion for photos: zoom in, zoom out, pan
 
+LAYOUTS, DUETS & SHORTS
+• Split-screen layouts: 2 stacked, 2 + caption band, 3 stacked, side by side, picture in picture
+• Duet / reaction: a reel plays below while you record yourself on top, or import your own video
+• Make a Short from any video: 15, 30 or 60 seconds of highlights in 9:16
+• Layers: put a video or photo on top, move it, resize it, give it its own filter
+• Share any video to RizCut from your gallery or other apps
+
 STYLE
 • 8 filters (Vivid, Neon, Warm, Cool, Vintage, Fade, B&W) plus brightness, contrast and saturation
 • Text in any colour and size, with an optional background box
 • Stickers you can place anywhere
-• Fade and flash transitions between clips
+• Transitions: fade, flash, slide, wipe and zoom
+• News-style caption bands in yellow, white, black or pink
 • Canvas for every app: 9:16, 1:1, 16:9, 4:5 with blurred or solid background
 
 SOUND

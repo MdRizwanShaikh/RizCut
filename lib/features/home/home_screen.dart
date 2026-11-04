@@ -6,6 +6,7 @@ import '../../core/theme.dart';
 import '../../services/share/share_intake.dart';
 import '../../services/storage/draft_store.dart';
 import '../editor/editor_screen.dart';
+import '../duet/duet_screen.dart';
 import '../editor/layer_sheet.dart';
 import '../editor/layers.dart';
 import '../editor/shorts.dart';
@@ -122,6 +123,16 @@ class _HomeScreenState extends State<HomeScreen> {
         extra: sources.skip(1).take(tpl.slotCount - 1).toList(), layout: tpl);
   }
 
+  Future<void> _duet(BuildContext context) async {
+    final reels = kIsWeb ? [_demoSources.first] : await _pick(FileType.video);
+    if (reels.isEmpty || !context.mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => DuetScreen(reel: reels.first)),
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 150));
+    _reload();
+  }
+
   Future<void> _makeShort(BuildContext context) async {
     final sources = kIsWeb ? [_demoSources.first] : await _pick(FileType.video);
     if (sources.isEmpty || !context.mounted) return;
@@ -231,6 +242,15 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ),
                   ],
+                ),
+                const SizedBox(height: 12),
+                _QuickCard(
+                  key: const Key('home-duet'),
+                  icon: Icons.splitscreen,
+                  title: 'Duet / Reaction',
+                  subtitle: 'Reel below, you on top — record or import',
+                  color: RizColors.pink,
+                  onTap: () => _duet(context),
                 ),
                 const SizedBox(height: 12),
                 if (kIsWeb)

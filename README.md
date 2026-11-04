@@ -28,6 +28,14 @@ Full roadmap: [docs/PLAN.md](docs/PLAN.md)
 - Audio: original sound volume/mute, background music (loops, fade in/out)
 - Drafts auto-save on the device (no login) and reopen from Home
 - Export 480p / 720p / 1080p at 30/60 fps → gallery + share
+- Layers (video/photo on top, own filter and sound), split-screen layouts
+  (2 stacked, 2 + caption, 3 stacked, side by side, PiP)
+- Duet / reaction: reel below, record yourself with the camera (live filter)
+  or import your own video on top
+- Make a Short: any video → 15/30/60 s 9:16 highlights
+- Transitions: fade black/white, pink flash, slide left/up, wipe, zoom;
+  caption band text styles
+- Share to RizCut from other apps (Android share sheet)
 - Settings: optional Google/email sign-in, back up / restore drafts, delete
   account, privacy policy, licenses
 

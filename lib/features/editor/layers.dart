@@ -3,6 +3,7 @@ library;
 
 import 'dart:ui' show Offset;
 
+import 'color_grade.dart';
 import 'media.dart';
 
 /// A rectangle in canvas fractions (0..1).
@@ -64,6 +65,7 @@ class Layer {
     required this.sourceOut,
     this.frame = const FrameRect(0.58, 0.05, 0.38, 0.24),
     this.volume = 0,
+    this.grade,
   });
 
   final String id;
@@ -79,6 +81,9 @@ class Layer {
   /// Layer sound level; 0 = muted (default, so layouts don't get noisy).
   final double volume;
 
+  /// The layer's own filter; null = use the project's filter.
+  final ColorGrade? grade;
+
   Duration get length => sourceOut - sourceIn;
   Duration get end => start + length;
   bool visibleAt(Duration t) => t >= start && t < end;
@@ -90,6 +95,8 @@ class Layer {
     FrameRect? frame,
     double? volume,
     String? mediaId,
+    ColorGrade? grade,
+    bool sameGradeAsProject = false,
   }) =>
       Layer(
         id: id,
@@ -99,6 +106,7 @@ class Layer {
         sourceOut: sourceOut ?? this.sourceOut,
         frame: frame ?? this.frame,
         volume: volume ?? this.volume,
+        grade: sameGradeAsProject ? null : (grade ?? this.grade),
       );
 
   Map<String, Object?> toJson() => {
@@ -109,6 +117,7 @@ class Layer {
         'out': sourceOut.inMicroseconds,
         'frame': frame.toJson(),
         if (volume != 0) 'vol': volume,
+        if (grade != null) 'grade': grade!.toJson(),
       };
 
   factory Layer.fromJson(Map<String, Object?> j) => Layer(
@@ -121,6 +130,9 @@ class Layer {
             ? const FrameRect(0.58, 0.05, 0.38, 0.24)
             : FrameRect.fromJson(j['frame'] as List),
         volume: (j['vol'] as num?)?.toDouble() ?? 0,
+        grade: j['grade'] == null
+            ? null
+            : ColorGrade.fromJson((j['grade'] as Map).cast()),
       );
 }
 

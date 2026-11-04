@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme.dart';
+import 'color_grade.dart';
 import 'layers.dart';
 
 /// Result of the layer sheet: an edited layer, or `delete`.
@@ -130,6 +131,39 @@ class _LayerSheetState extends State<LayerSheet> {
                   ),
                 ],
               ),
+            const SizedBox(height: 4),
+            const Text('Filter', style: TextStyle(color: RizColors.textDim)),
+            const SizedBox(height: 8),
+            SizedBox(
+              height: 40,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: ChoiceChip(
+                      label: const Text('Same as video'),
+                      selected: _l.grade == null,
+                      selectedColor: RizColors.violet,
+                      onSelected: (_) =>
+                          setState(() => _l = _l.copyWith(sameGradeAsProject: true)),
+                    ),
+                  ),
+                  for (final f in FilterPreset.values)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: ChoiceChip(
+                        label: Text(f.label),
+                        selected: _l.grade != null && _l.grade!.preset == f,
+                        selectedColor: RizColors.violet,
+                        onSelected: (_) => setState(
+                            () => _l = _l.copyWith(grade: ColorGrade(preset: f))),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
             const Text('Tip: drag the layer on the video to move it.',
                 style: TextStyle(color: RizColors.textDim, fontSize: 12)),
           ],

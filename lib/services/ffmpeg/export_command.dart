@@ -421,10 +421,11 @@ List<String> buildProjectExportArgs({
     }
     final px = l.frame.pixels(width, height);
     final st = ffmpegSeconds(l.start);
+    final lg = l.grade == null ? grade : gradeFilter(l.grade!);
     graph.add('[$k:v]setpts=PTS-STARTPTS,fps=$fps,'
         'scale=${px.w}:${px.h}:force_original_aspect_ratio=increase,'
         'crop=${px.w}:${px.h},setsar=1,'
-        '${grade.isEmpty ? '' : '$grade,'}format=yuv420p,'
+        '${lg.isEmpty ? '' : '$lg,'}format=yuv420p,'
         'setpts=PTS+$st/TB[l$j]');
     graph.add("[$last][l$j]overlay=x=${px.x}:y=${px.y}:"
         "enable='between(t,$st,${ffmpegSeconds(l.end)})':eof_action=pass[y$j]");
