@@ -40,14 +40,18 @@ class _FfmpegExporter implements ProjectExporter {
     // Probe every media item once: size (with rotation) and audio.
     final media = <String, ExportMedia>{};
     ({int width, int height})? firstSize;
-    for (final c in project.clips) {
-      if (media.containsKey(c.mediaId)) continue;
-      final m = project.mediaFor(c);
+    final used = [
+      for (final c in project.clips) c.mediaId,
+      for (final l in project.layers) l.mediaId,
+    ];
+    for (final id in used) {
+      if (media.containsKey(id)) continue;
+      final m = project.mediaById(id);
       if (m == null || m.source.isUrl) {
         throw ExportFailed('A clip points to a file that is not on this device.');
       }
       final probe = await _probe(m.source.location);
-      media[c.mediaId] = ExportMedia(
+      media[id] = ExportMedia(
         path: m.source.location,
         isImage: m.isImage,
         hasAudio: !m.isImage && probe.hasAudio,

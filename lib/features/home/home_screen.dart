@@ -5,6 +5,10 @@ import 'package:flutter/material.dart';
 import '../../core/theme.dart';
 import '../../services/storage/draft_store.dart';
 import '../editor/editor_screen.dart';
+import '../editor/layer_sheet.dart';
+import '../editor/layers.dart';
+import '../editor/shorts.dart';
+import '../editor/shorts_sheet.dart';
 import '../editor/video_source.dart';
 import '../settings/settings_screen.dart';
 
@@ -72,24 +76,68 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _newProject(BuildContext context) async {
-    final files = await FilePicker.pickFiles(type: FileType.media);
-    if (files.isEmpty || !context.mounted) return;
-    final sources = [
+  Future<List<VideoSource>> _pick(FileType type) async {
+    final files = await FilePicker.pickFiles(type: type);
+    return [
       for (final f in files)
         f.path != null
             ? VideoSource.file(f.path!, name: f.name)
             : VideoSource.url(f.uri.toString(), name: f.name),
     ];
+  }
+
+  Future<void> _newProject(BuildContext context) async {
+    final sources = await _pick(FileType.media);
+    if (sources.isEmpty || !context.mounted) return;
     _open(context, sources.first, extra: sources.skip(1).toList());
   }
 
+  /// Web preview has no real files: fill templates with the demo media.
+  static const _demoSources = [
+    VideoSource.url('demo.mp4', name: 'Demo'),
+    VideoSource.url('demo_photo.jpg', name: 'Demo photo'),
+    VideoSource.url('demo.mp4', name: 'Demo 2'),
+  ];
+
+  Future<void> _layouts(BuildContext context) async {
+    final tpl = await showModalBottomSheet<LayoutTemplate>(
+      context: context,
+      builder: (_) => const LayoutPickerSheet(),
+    );
+    if (tpl == null || !context.mounted) return;
+    final sources = kIsWeb
+        ? _demoSources.take(tpl.slotCount).toList()
+        : await _pick(FileType.media);
+    if (sources.isEmpty || !context.mounted) return;
+    _open(context, sources.first,
+        extra: sources.skip(1).take(tpl.slotCount - 1).toList(), layout: tpl);
+  }
+
+  Future<void> _makeShort(BuildContext context) async {
+    final sources = kIsWeb ? [_demoSources.first] : await _pick(FileType.video);
+    if (sources.isEmpty || !context.mounted) return;
+    final options = await showModalBottomSheet<ShortOptions>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => const ShortsSheet(),
+    );
+    if (options == null || !context.mounted) return;
+    _open(context, sources.first, short: options);
+  }
+
   Future<void> _open(BuildContext context, VideoSource source,
-      {Draft? draft, List<VideoSource> extra = const []}) async {
+      {Draft? draft,
+      List<VideoSource> extra = const [],
+      LayoutTemplate? layout,
+      ShortOptions? short}) async {
     await Navigator.of(context).push(
       MaterialPageRoute(
-          builder: (_) =>
-              EditorScreen(source: source, draft: draft, extra: extra)),
+          builder: (_) => EditorScreen(
+              source: source,
+              draft: draft,
+              extra: extra,
+              layout: layout,
+              short: short)),
     );
     // Give the editor's final save a moment, then refresh drafts.
     await Future<void>.delayed(const Duration(milliseconds: 150));
@@ -149,7 +197,33 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 const SizedBox(height: 20),
                 _NewProjectCard(onTap: () => _newProject(context)),
-                const SizedBox(height: 16),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _QuickCard(
+                        key: const Key('home-layouts'),
+                        icon: Icons.dashboard_customize_outlined,
+                        title: 'Layouts',
+                        subtitle: 'Split screen',
+                        color: const Color(0xFFFFE14D),
+                        onTap: () => _layouts(context),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _QuickCard(
+                        key: const Key('home-short'),
+                        icon: Icons.bolt,
+                        title: 'Make a Short',
+                        subtitle: 'Any video → 9:16',
+                        color: RizColors.cyan,
+                        onTap: () => _makeShort(context),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
                 if (kIsWeb)
                   OutlinedButton.icon(
                     key: const Key('demo'),
@@ -312,6 +386,59 @@ class _DraftCard extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _QuickCard extends StatelessWidget {
+  const _QuickCard({
+    super.key,
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.color,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String title, subtitle;
+  final Color color;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: RizColors.surface,
+      borderRadius: BorderRadius.circular(18),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: color.withValues(alpha: 0.5)),
+          ),
+          child: Row(
+            children: [
+              Icon(icon, color: color),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
+                    Text(subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: RizColors.textDim, fontSize: 12)),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

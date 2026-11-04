@@ -25,6 +25,8 @@ class Timeline extends StatefulWidget {
     required this.onTrimUpdate,
     required this.onTrimEnd,
     this.thumbFor,
+    this.selectedLayer,
+    this.onTapLayer,
   });
 
   final Project project;
@@ -47,6 +49,8 @@ class Timeline extends StatefulWidget {
 
   /// Filmstrip image for a clip (video frame or the photo itself).
   final ImageProvider? Function(VideoClip clip)? thumbFor;
+  final int? selectedLayer;
+  final ValueChanged<int>? onTapLayer;
 
   @override
   State<Timeline> createState() => _TimelineState();
@@ -210,6 +214,21 @@ class _TimelineState extends State<Timeline> {
                       height: _laneHeight * _lanes(p).count.clamp(1, _maxLanes),
                       child: Stack(
                         children: [
+                          for (var j = 0; j < p.layers.length; j++)
+                            Positioned(
+                              left: _px(p.layers[j].start),
+                              width: _px(p.layers[j].length)
+                                  .clamp(24.0, double.infinity),
+                              top: _laneHeight *
+                                  _lanes(p).of[p.texts.length + j]
+                                      .clamp(0, _maxLanes - 1),
+                              height: _laneHeight - 4,
+                              child: _LayerBar(
+                                index: j,
+                                selected: j == widget.selectedLayer,
+                                onTap: () => widget.onTapLayer?.call(j),
+                              ),
+                            ),
                           for (var i = 0; i < p.texts.length; i++)
                             Positioned(
                               left: _px(p.texts[i].start),
@@ -259,26 +278,68 @@ class _TimelineState extends State<Timeline> {
 }
 
 const double _laneHeight = 28;
-const int _maxLanes = 3;
+const int _maxLanes = 4;
 
 /// Puts overlapping text/sticker bars on separate rows (greedy, by start).
+/// Puts overlapping text/sticker/layer bars on separate rows (greedy by
+/// start). Indices: texts first, then layers.
 ({List<int> of, int count}) _lanes(Project p) {
-  final order = [for (var i = 0; i < p.texts.length; i++) i]
-    ..sort((a, b) => p.texts[a].start.compareTo(p.texts[b].start));
+  final spans = [
+    for (final t in p.texts) (t.start, t.end),
+    for (final l in p.layers) (l.start, l.end),
+  ];
+  final order = [for (var i = 0; i < spans.length; i++) i]
+    ..sort((a, b) => spans[a].$1.compareTo(spans[b].$1));
   final laneEnds = <Duration>[];
-  final of = List<int>.filled(p.texts.length, 0);
+  final of = List<int>.filled(spans.length, 0);
   for (final i in order) {
-    final t = p.texts[i];
-    var lane = laneEnds.indexWhere((end) => end <= t.start);
+    final (start, end) = spans[i];
+    var lane = laneEnds.indexWhere((e) => e <= start);
     if (lane < 0) {
-      laneEnds.add(t.end);
+      laneEnds.add(end);
       lane = laneEnds.length - 1;
     } else {
-      laneEnds[lane] = t.end;
+      laneEnds[lane] = end;
     }
     of[i] = lane;
   }
   return (of: of, count: laneEnds.length);
+}
+
+class _LayerBar extends StatelessWidget {
+  const _LayerBar({required this.index, required this.selected, required this.onTap});
+  final int index;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    const c = Color(0xFFFFB36B);
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6),
+        alignment: Alignment.centerLeft,
+        decoration: BoxDecoration(
+          color: c.withValues(alpha: selected ? 0.9 : 0.35),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: c),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.layers_outlined, size: 14, color: Colors.white),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Text('Layer ${index + 1}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Colors.white, fontSize: 12)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _Ruler extends StatelessWidget {

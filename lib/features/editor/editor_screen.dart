@@ -16,10 +16,13 @@ import 'look_sheet.dart';
 import 'filter_sheet.dart';
 import '../../services/thumbs/thumbnailer.dart';
 import 'image_provider.dart';
+import 'layer_sheet.dart';
+import 'layers.dart';
 import 'media.dart';
 import 'arrange_sheet.dart';
 import 'overlay_style.dart';
 import 'project.dart';
+import 'shorts.dart';
 import 'sticker_sheet.dart';
 import 'text_editor_sheet.dart';
 import 'timeline.dart';
@@ -39,8 +42,16 @@ class EditorScreen extends StatefulWidget {
     required this.source,
     this.draft,
     this.extra = const [],
+    this.layout,
+    this.short,
   });
   final VideoSource source;
+
+  /// Start a split-screen project: [source] + [extra] fill the slots.
+  final LayoutTemplate? layout;
+
+  /// Start a 9:16 Short cut from [source].
+  final ShortOptions? short;
 
   /// More files picked together with [source]; appended as clips.
   final List<VideoSource> extra;
@@ -55,6 +66,10 @@ class EditorScreen extends StatefulWidget {
 class _EditorScreenState extends State<EditorScreen> {
   /// One player per video media item (photos need none).
   final _players = <String, VideoPlayerController>{};
+
+  /// One player per video layer (by layer id), separate from main players.
+  final _layerPlayers = <String, VideoPlayerController>{};
+  int? _selectedLayer;
 
   /// Player of the clip under the playhead (null on a photo clip).
   VideoPlayerController? _active;
@@ -111,9 +126,44 @@ class _EditorScreenState extends State<EditorScreen> {
   Future<void> _open() async {
     try {
       var project = widget.draft?.project;
+      if (project == null && widget.short != null) {
+        final item = MediaItem(
+          id: DraftStore.newId(),
+          source: widget.source,
+          kind: MediaKind.video,
+        );
+        final loaded = await _loadPlayers(
+            Project(clips: const [], media: List.unmodifiable([item])));
+        if (!mounted) return;
+        project = buildShort(loaded.media.first, widget.short!);
+        setState(() => _project = project);
+        _enterClip(0, p.clips.first.sourceIn);
+        _projectChanged();
+        return;
+      }
+      if (project == null && widget.layout != null) {
+        final items = [
+          for (final s in [widget.source, ...widget.extra])
+            MediaItem(
+              id: DraftStore.newId() + s.location.hashCode.toString(),
+              source: s,
+              kind: mediaKindOf(s),
+            ),
+        ];
+        final loaded = await _loadPlayers(Project(
+          clips: const [],
+          media: List.unmodifiable(items),
+        ));
+        if (!mounted) return;
+        project = Project.fromLayout(widget.layout!, loaded.media);
+        setState(() => _project = project);
+        await _syncLayerPlayers();
+        _enterClip(0, p.clips.first.sourceIn);
+        _projectChanged();
+        return;
+      }
       if (project == null) {
-        final kind = mediaKindFor(
-            widget.source.name.isEmpty ? widget.source.location : widget.source.name);
+        final kind = mediaKindOf(widget.source);
         project = Project.fromMedia(MediaItem(
           id: DraftStore.newId(),
           source: widget.source,
@@ -128,11 +178,12 @@ class _EditorScreenState extends State<EditorScreen> {
             clips: [Project.clipFor(project.media.first)]);
       }
       setState(() => _project = project);
+      await _syncLayerPlayers();
       _enterClip(0, p.clips.first.sourceIn);
       _projectChanged(save: widget.draft == null);
       if (widget.extra.isNotEmpty) {
         await _appendMedia(
-          [for (final s in widget.extra) (s, mediaKindFor(s.name.isEmpty ? s.location : s.name))],
+          [for (final s in widget.extra) (s, mediaKindOf(s))],
           quiet: true,
         );
         _undo.clear();
@@ -212,6 +263,9 @@ class _EditorScreenState extends State<EditorScreen> {
       c.removeListener(_onTick);
       c.dispose();
     }
+    for (final c in _layerPlayers.values) {
+      c.dispose();
+    }
     _music?.dispose();
     applyWebVideoFilter(null);
     super.dispose();
@@ -234,6 +288,7 @@ class _EditorScreenState extends State<EditorScreen> {
       }
     }
     _syncMusicSource();
+    _syncLayerPlayers();
     _loadThumbs();
     if (save) {
       _dirty = true;
@@ -319,6 +374,62 @@ class _EditorScreenState extends State<EditorScreen> {
     play ? m.play() : m.pause();
   }
 
+  // ---------- layers ----------
+
+  /// Creates players for new video layers, drops ones for removed layers,
+  /// and applies volumes.
+  Future<void> _syncLayerPlayers() async {
+    if (_project == null) return;
+    final ids = {for (final l in p.layers) l.id};
+    for (final id in _layerPlayers.keys.toList()) {
+      if (!ids.contains(id)) _layerPlayers.remove(id)?.dispose();
+    }
+    for (final l in p.layers) {
+      final m = p.mediaById(l.mediaId);
+      if (m == null || m.isImage) continue;
+      final existing = _layerPlayers[l.id];
+      if (existing != null) {
+        await existing.setVolume(l.volume);
+        continue;
+      }
+      try {
+        final c = await m.source.createController();
+        await c.initialize();
+        if (!mounted || _project == null || !p.layers.any((x) => x.id == l.id)) {
+          await c.dispose();
+          continue;
+        }
+        await c.setVolume(l.volume);
+        _layerPlayers[l.id] = c;
+        if (mounted) setState(() {});
+        _syncLayers(seek: true);
+      } catch (_) {}
+    }
+  }
+
+  /// Keeps layer players in step with the playhead.
+  void _syncLayers({bool seek = false}) {
+    if (_project == null) return;
+    for (final l in p.layers) {
+      final c = _layerPlayers[l.id];
+      if (c == null || !c.value.isInitialized) continue;
+      if (l.visibleAt(_t)) {
+        final target = l.sourceIn + (_t - l.start);
+        if (_playing) {
+          if (!c.value.isPlaying) {
+            c.seekTo(target);
+            c.play();
+          }
+        } else if (seek) {
+          c.pause();
+          c.seekTo(target);
+        }
+      } else if (c.value.isPlaying) {
+        c.pause();
+      }
+    }
+  }
+
   // ---------- playback across clips ----------
 
   void _advance() {
@@ -345,6 +456,7 @@ class _EditorScreenState extends State<EditorScreen> {
       _t = p.clipStart(_clip) +
           Duration(microseconds: (off.inMicroseconds / clip.speed).round());
     });
+    _syncLayers();
   }
 
   void _onPhotoTick(Timer _) {
@@ -360,6 +472,7 @@ class _EditorScreenState extends State<EditorScreen> {
     } else {
       setState(() => _t = next);
     }
+    _syncLayers();
   }
 
   Future<void> _enterClip(int index, Duration sourcePos,
@@ -394,6 +507,7 @@ class _EditorScreenState extends State<EditorScreen> {
     if (hit == null) return;
     setState(() => _t = clamped);
     _enterClip(hit.index, hit.sourcePosition);
+    _syncLayers(seek: true);
   }
 
   void _play() {
@@ -404,10 +518,14 @@ class _EditorScreenState extends State<EditorScreen> {
     setState(() => _playing = true);
     _enterClip(hit.index, hit.sourcePosition, play: true);
     _syncMusicPosition(play: true);
+    _syncLayers(seek: true);
   }
 
   void _pause() {
     _active?.pause();
+    for (final c in _layerPlayers.values) {
+      c.pause();
+    }
     _photoTimer?.cancel();
     _music?.pause();
     setState(() => _playing = false);
@@ -462,6 +580,12 @@ class _EditorScreenState extends State<EditorScreen> {
 
   void _delete() {
     _pause();
+    if (_selectedLayer != null) {
+      final i = _selectedLayer!;
+      setState(() => _selectedLayer = null);
+      _apply(p.removeLayer(i));
+      return;
+    }
     if (_selectedText != null) {
       final i = _selectedText!;
       setState(() => _selectedText = null);
@@ -473,21 +597,6 @@ class _EditorScreenState extends State<EditorScreen> {
       return;
     }
     _apply(p.deleteClip(_activeClip));
-  }
-
-  Future<void> _addMedia() async {
-    _pause();
-    final files = await FilePicker.pickFiles(type: FileType.media);
-    if (files.isEmpty || !mounted) return;
-    await _appendMedia([
-      for (final f in files)
-        (
-          f.path != null
-              ? VideoSource.file(f.path!, name: f.name)
-              : VideoSource.url(f.uri.toString(), name: f.name),
-          mediaKindFor(f.name),
-        ),
-    ]);
   }
 
   Future<void> _appendMedia(List<(VideoSource, MediaKind)> picked,
@@ -512,15 +621,34 @@ class _EditorScreenState extends State<EditorScreen> {
     }
   }
 
-  Future<void> _addMediaSheet() async {
-    if (!kIsWeb) return _addMedia();
+  /// Lets the user choose files (and demo media on web). Empty if cancelled.
+  Future<List<(VideoSource, MediaKind)>> _pickSources({String? title}) async {
     _pause();
+    Future<List<(VideoSource, MediaKind)>> device() async {
+      final files = await FilePicker.pickFiles(type: FileType.media);
+      return [
+        for (final f in files)
+          (
+            f.path != null
+                ? VideoSource.file(f.path!, name: f.name)
+                : VideoSource.url(f.uri.toString(), name: f.name),
+            mediaKindFor(f.name),
+          ),
+      ];
+    }
+
+    if (!kIsWeb) return device();
     final choice = await showModalBottomSheet<String>(
       context: context,
       builder: (ctx) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (title != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+                child: Text(title, style: Theme.of(ctx).textTheme.titleMedium),
+              ),
             ListTile(
               leading: const Icon(Icons.perm_media_outlined, color: RizColors.cyan),
               title: const Text('Videos or photos from device'),
@@ -541,16 +669,117 @@ class _EditorScreenState extends State<EditorScreen> {
         ),
       ),
     );
-    switch (choice) {
-      case 'device':
-        await _addMedia();
-      case 'photo':
-        await _appendMedia(
-            [(const VideoSource.url('demo_photo.jpg', name: 'Demo photo'), MediaKind.image)]);
-      case 'video':
-        await _appendMedia(
-            [(const VideoSource.url('demo.mp4', name: 'Demo'), MediaKind.video)]);
+    return switch (choice) {
+      'device' => await device(),
+      'photo' => [(const VideoSource.url('demo_photo.jpg', name: 'Demo photo'), MediaKind.image)],
+      'video' => [(const VideoSource.url('demo.mp4', name: 'Demo'), MediaKind.video)],
+      _ => const [],
+    };
+  }
+
+  Future<void> _addMediaSheet() async {
+    final picked = await _pickSources();
+    if (picked.isNotEmpty && mounted) await _appendMedia(picked);
+  }
+
+  /// Turns picked sources into media items with durations/sizes loaded.
+  Future<List<MediaItem>> _loadNewMedia(List<(VideoSource, MediaKind)> picked) async {
+    final items = [
+      for (final (src, kind) in picked)
+        MediaItem(
+            id: DraftStore.newId() + src.location.hashCode.toString(),
+            source: src,
+            kind: kind),
+    ];
+    final loaded = await _loadPlayers(p.copyWith(media: [...p.media, ...items]));
+    return [for (final m in items) loaded.mediaById(m.id) ?? m];
+  }
+
+  Future<void> _addLayer() async {
+    final picked = await _pickSources(title: 'Add a layer on top');
+    if (picked.isEmpty || !mounted) return;
+    try {
+      final m = (await _loadNewMedia([picked.first])).first;
+      if (!mounted) return;
+      final room = p.duration - _t;
+      final want = m.isImage ? const Duration(seconds: 3) : m.duration;
+      final len = want < room ? want : room;
+      final layer = Layer(
+        id: 'L${DraftStore.newId()}',
+        mediaId: m.id,
+        start: _t,
+        sourceIn: Duration.zero,
+        sourceOut: len < Project.minClip ? Project.minClip : len,
+      );
+      _apply(p.copyWith(media: [...p.media, m], layers: [...p.layers, layer]));
+      setState(() {
+        _selectedLayer = p.layers.length - 1;
+        _selectedText = null;
+      });
+    } catch (_) {
+      if (mounted) _toast('Could not open that file');
     }
+  }
+
+  Future<void> _editLayer(int i) async {
+    _pause();
+    final l = p.layers[i];
+    final m = p.mediaById(l.mediaId);
+    final result = await showModalBottomSheet<LayerEdit>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => LayerSheet(initial: l, hasSound: m != null && !m.isImage),
+    );
+    if (result == null) return;
+    if (result.delete) {
+      setState(() => _selectedLayer = null);
+      _apply(p.removeLayer(i));
+    } else {
+      _apply(p.updateLayer(i, result.layer!));
+    }
+  }
+
+  Future<void> _applyLayout() async {
+    _pause();
+    final tpl = await showModalBottomSheet<LayoutTemplate>(
+      context: context,
+      builder: (_) => const LayoutPickerSheet(
+          note: 'Your current video goes in frame 1. You can pick the rest next.'),
+    );
+    if (tpl == null || !mounted) return;
+    // Current media in a sensible order: main clip first, then layers, rest.
+    final ids = <String>[
+      p.clips.first.mediaId,
+      for (final l in p.layers) l.mediaId,
+      for (final c in p.clips) c.mediaId,
+    ];
+    final items = <MediaItem>[];
+    for (final id in ids) {
+      final m = p.mediaById(id);
+      if (m != null && !items.any((x) => x.id == id)) items.add(m);
+    }
+    if (items.length < tpl.slotCount) {
+      final need = tpl.slotCount - items.length;
+      final picked = await _pickSources(
+          title: 'Pick $need more video${need == 1 ? '' : 's'} or photo${need == 1 ? '' : 's'}');
+      if (!mounted) return;
+      items.addAll(await _loadNewMedia(picked.take(need).toList()));
+    }
+    if (!mounted) return;
+    final built = Project.fromLayout(tpl, items);
+    setState(() {
+      _selectedLayer = null;
+      _selectedText = null;
+    });
+    _apply(built.copyWith(
+      media: {for (final m in [...p.media, ...items]) m.id: m}.values.toList(),
+      texts: [...built.texts, ...p.texts],
+      grade: p.grade,
+      music: p.music,
+      clearMusic: p.music == null,
+      originalVolume: p.originalVolume,
+    ));
+    _seek(Duration.zero);
   }
 
   Future<void> _editLook() async {
@@ -906,7 +1135,15 @@ class _EditorScreenState extends State<EditorScreen> {
                         if (_playing) _pause();
                         _seek(t);
                       },
-                      onTapText: (i) => setState(() => _selectedText = i),
+                      onTapText: (i) => setState(() {
+                        _selectedText = i;
+                        _selectedLayer = null;
+                      }),
+                      selectedLayer: _selectedLayer,
+                      onTapLayer: (i) => setState(() {
+                        _selectedLayer = i;
+                        _selectedText = null;
+                      }),
                       onTapClip: _tapClip,
                       onLongPressClip: (_) => _arrange(),
                       onTrimStart: _trimStart,
@@ -929,8 +1166,11 @@ class _EditorScreenState extends State<EditorScreen> {
     final clip = p.clips[_clip.clamp(0, p.clips.length - 1)];
     return GestureDetector(
       onTap: () {
-        if (_selectedText != null) {
-          setState(() => _selectedText = null);
+        if (_selectedText != null || _selectedLayer != null) {
+          setState(() {
+            _selectedText = null;
+            _selectedLayer = null;
+          });
         } else {
           _playing ? _pause() : _play();
         }
@@ -945,22 +1185,39 @@ class _EditorScreenState extends State<EditorScreen> {
             return Stack(
               clipBehavior: Clip.hardEdge,
               children: [
-                Positioned.fill(
-                  child: _withTransition(
-                    tr,
-                    box.biggest,
-                    _withMotion(
-                      clip,
-                      Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          _background(clip),
-                          _graded(clip, _media(clip, BoxFit.contain)),
-                        ],
+                if (!p.mainFrame.isFull)
+                  Positioned.fill(
+                    child: ColoredBox(
+                        color: Color(p.background.argb ?? 0xFF000000)),
+                  ),
+                Positioned(
+                  left: p.mainFrame.x * box.maxWidth,
+                  top: p.mainFrame.y * box.maxHeight,
+                  width: p.mainFrame.w * box.maxWidth,
+                  height: p.mainFrame.h * box.maxHeight,
+                  child: ClipRect(
+                    child: _withTransition(
+                      tr,
+                      Size(p.mainFrame.w * box.maxWidth,
+                          p.mainFrame.h * box.maxHeight),
+                      _withMotion(
+                        clip,
+                        p.mainCover
+                            ? _graded(clip, _media(clip, BoxFit.cover))
+                            : Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  _background(clip),
+                                  _graded(clip, _media(clip, BoxFit.contain)),
+                                ],
+                              ),
                       ),
                     ),
                   ),
                 ),
+                for (var i = 0; i < p.layers.length; i++)
+                  if (p.layers[i].visibleAt(_t) || i == _selectedLayer)
+                    _layerView(i, box.biggest),
                 for (final i in visible)
                   _TextOnPreview(
                     overlay: p.texts[i],
@@ -1042,6 +1299,75 @@ class _EditorScreenState extends State<EditorScreen> {
     }
     if (look.turns != 0) child = RotatedBox(quarterTurns: look.turns, child: child);
     return FittedBox(fit: fit, clipBehavior: Clip.hardEdge, child: child);
+  }
+
+  /// A layer in its frame; tap to select, drag to move.
+  Widget _layerView(int i, Size box) {
+    final l = p.layers[i];
+    final f = l.frame;
+    final m = p.mediaById(l.mediaId);
+    final player = _layerPlayers[l.id];
+    Widget media;
+    if (player != null && player.value.isInitialized) {
+      final size = player.value.size;
+      media = FittedBox(
+        fit: BoxFit.cover,
+        clipBehavior: Clip.hardEdge,
+        child: SizedBox(
+            width: size.width, height: size.height, child: VideoPlayer(player)),
+      );
+    } else if (m != null && m.isImage) {
+      media = Image(image: imageFor(m.source), fit: BoxFit.cover, gaplessPlayback: true);
+    } else {
+      media = const ColoredBox(color: RizColors.surfaceHigh);
+    }
+    if (!p.grade.isIdentity && !(kIsWeb && player != null)) {
+      media = ColorFiltered(
+          colorFilter: ColorFilter.matrix(p.grade.flutterMatrix), child: media);
+    }
+    final selected = i == _selectedLayer;
+    return Positioned(
+      left: f.x * box.width,
+      top: f.y * box.height,
+      width: f.w * box.width,
+      height: f.h * box.height,
+      child: GestureDetector(
+        onTap: () => setState(() {
+          _selectedLayer = i;
+          _selectedText = null;
+        }),
+        onDoubleTap: () => _editLayer(i),
+        onPanStart: (_) {
+          _undo.add(p);
+          _redo.clear();
+          setState(() {
+            _selectedLayer = i;
+            _selectedText = null;
+          });
+        },
+        onPanUpdate: (d) => setState(() {
+          final cur = p.layers[i].frame;
+          _project = p.updateLayer(
+            i,
+            p.layers[i].copyWith(
+              frame: cur.moveTo(Offset(cur.x + d.delta.dx / box.width,
+                  cur.y + d.delta.dy / box.height)),
+            ),
+          );
+        }),
+        onPanEnd: (_) => _projectChanged(),
+        child: Opacity(
+          opacity: l.visibleAt(_t) ? 1 : 0.45,
+          child: Container(
+            foregroundDecoration: selected
+                ? BoxDecoration(
+                    border: Border.all(color: const Color(0xFFFFB36B), width: 2))
+                : null,
+            child: ClipRect(child: media),
+          ),
+        ),
+      ),
+    );
   }
 
   /// Mirrors the export's transition filters (fade/slide/wipe/zoom).
@@ -1184,6 +1510,13 @@ class _EditorScreenState extends State<EditorScreen> {
           child: Row(
             children: [
               _Tool(icon: Icons.add_photo_alternate_outlined, label: 'Add', color: RizColors.cyan, onTap: _addMediaSheet),
+              _Tool(icon: Icons.dashboard_customize_outlined, label: 'Layout', color: const Color(0xFFFFE14D), onTap: _applyLayout),
+              _Tool(
+                icon: _selectedLayer != null ? Icons.tune : Icons.layers_outlined,
+                label: _selectedLayer != null ? 'Edit layer' : 'Layer',
+                color: const Color(0xFFFFB36B),
+                onTap: () => _selectedLayer != null ? _editLayer(_selectedLayer!) : _addLayer(),
+              ),
               _Tool(icon: Icons.aspect_ratio, label: 'Canvas', color: const Color(0xFFFFB36B), onTap: _canvas),
               _Tool(icon: Icons.crop_rotate, label: 'Edit', color: const Color(0xFF9DFF6B), onTap: _editLook),
               _Tool(icon: Icons.content_cut, label: 'Split', color: RizColors.magenta, onTap: _split),

@@ -315,6 +315,10 @@ List<String> buildProjectExportArgs({
   final half = kTransitionHalf.inMicroseconds / 1e6;
   final fps = settings.fps;
 
+  // The main track renders at its frame's size (whole canvas by default).
+  final mainPx = project.mainFrame.pixels(width, height);
+  final rw = mainPx.w, rh = mainPx.h;
+
   for (var i = 0; i < clips.length; i++) {
     final c = clips[i];
     final m = media[c.mediaId];
@@ -345,9 +349,14 @@ List<String> buildProjectExportArgs({
     final look = lookFilters(c.look);
     graph.add('[$i:v]setpts=(PTS-STARTPTS)/$speed,fps=$fps,'
         '${look.isEmpty ? '' : '${look.join(',')},'}format=yuv420p[r$i]');
-    graph.addAll(_fitToCanvas('r$i', 'c$i', width, height, project.background));
+    if (project.mainCover) {
+      graph.add('[r$i]scale=$rw:$rh:force_original_aspect_ratio=increase,'
+          'crop=$rw:$rh,setsar=1[c$i]');
+    } else {
+      graph.addAll(_fitToCanvas('r$i', 'c$i', rw, rh, project.background));
+    }
     final motion = zoomPanFilter(
-      c.look.motion, width, height, fps, frames,
+      c.look.motion, rw, rh, fps, frames,
       inFrames: inType == TransitionType.zoom ? dFrames : 0,
       outFrames: outType == TransitionType.zoom ? dFrames : 0,
     );
@@ -362,7 +371,7 @@ List<String> buildProjectExportArgs({
       'format=yuv420p',
     ];
     final moves = slideWipeFilters(
-        'g$i', 'v$i', width, height, fps, len, d, inType, outType);
+        'g$i', 'v$i', rw, rh, fps, len, d, inType, outType);
     graph.add('[c$i]${v.join(',')}[${moves.isEmpty ? 'v$i' : 'g$i'}]');
     graph.addAll(moves);
     concatInputs.write('[v$i]');
@@ -390,7 +399,46 @@ List<String> buildProjectExportArgs({
   graph.add('${concatInputs}concat=n=${clips.length}:v=1:a=1[vc][ac]');
 
   var last = 'vc';
-  final overlayBase = clips.length;
+  if (!project.mainFrame.isFull) {
+    final bg = project.background.ffmpegColor;
+    graph.add('[vc]pad=$width:$height:${mainPx.x}:${mainPx.y}:color=$bg[vp]');
+    last = 'vp';
+  }
+
+  // Layers: own input each, cover-fit into their frame, timed overlay.
+  final layerBase = clips.length;
+  final layerAudio = <String>[];
+  for (var j = 0; j < project.layers.length; j++) {
+    final l = project.layers[j];
+    final m = media[l.mediaId];
+    if (m == null) throw ArgumentError('layer $j has no media');
+    final k = layerBase + j;
+    final lenS = ffmpegSeconds(l.length);
+    if (m.isImage) {
+      inputs.addAll(['-loop', '1', '-framerate', '$fps', '-t', lenS, '-i', m.path]);
+    } else {
+      inputs.addAll(['-ss', ffmpegSeconds(l.sourceIn), '-t', lenS, '-i', m.path]);
+    }
+    final px = l.frame.pixels(width, height);
+    final st = ffmpegSeconds(l.start);
+    graph.add('[$k:v]setpts=PTS-STARTPTS,fps=$fps,'
+        'scale=${px.w}:${px.h}:force_original_aspect_ratio=increase,'
+        'crop=${px.w}:${px.h},setsar=1,'
+        '${grade.isEmpty ? '' : '$grade,'}format=yuv420p,'
+        'setpts=PTS+$st/TB[l$j]');
+    graph.add("[$last][l$j]overlay=x=${px.x}:y=${px.y}:"
+        "enable='between(t,$st,${ffmpegSeconds(l.end)})':eof_action=pass[y$j]");
+    last = 'y$j';
+    if (l.volume > 0 && m.hasAudio && !m.isImage) {
+      final ms = l.start.inMilliseconds;
+      graph.add('[$k:a]asetpts=PTS-STARTPTS,aresample=44100,'
+          'aformat=sample_rates=44100:channel_layouts=stereo,'
+          'volume=${_num(l.volume)},adelay=$ms:all=1[la$j]');
+      layerAudio.add('la$j');
+    }
+  }
+
+  final overlayBase = clips.length + project.layers.length;
   for (var i = 0; i < overlays.length; i++) {
     final o = overlays[i];
     final next = 'o$i';
@@ -402,21 +450,14 @@ List<String> buildProjectExportArgs({
     last = next;
   }
 
+  // Audio: main track (with volume) + unmuted layers + looping music.
   final total = project.duration.inMicroseconds / 1e6;
   final anyAudio = clips.any((c) {
     final m = media[c.mediaId];
     return m != null && m.hasAudio && !m.isImage;
   });
   final useOriginal = anyAudio && project.originalVolume > 0;
-  String? audioOut;
-  if (useOriginal) {
-    if (project.originalVolume == 1) {
-      audioOut = 'ac';
-    } else {
-      graph.add('[ac]volume=${_num(project.originalVolume)}[ao]');
-      audioOut = 'ao';
-    }
-  }
+  final extras = [...layerAudio];
   if (music != null) {
     final idx = overlayBase + overlays.length;
     final fadeOut = total > 3 ? 1.5 : total / 3;
@@ -433,11 +474,25 @@ List<String> buildProjectExportArgs({
       ],
     ];
     graph.add('[$idx:a]${mf.join(',')}[m]');
-    if (audioOut != null) {
-      graph.add('[$audioOut][m]amix=inputs=2:duration=first:normalize=0[am]');
-      audioOut = 'am';
+    extras.add('m');
+  }
+  String? audioOut;
+  if (useOriginal || extras.isNotEmpty) {
+    // The main track's audio sets the length (amix duration=first).
+    var base = 'ac';
+    if (!useOriginal) {
+      graph.add('[ac]volume=0[ao]');
+      base = 'ao';
+    } else if (project.originalVolume != 1) {
+      graph.add('[ac]volume=${_num(project.originalVolume)}[ao]');
+      base = 'ao';
+    }
+    if (extras.isEmpty) {
+      audioOut = base;
     } else {
-      audioOut = 'm';
+      graph.add('[$base]${extras.map((e) => '[$e]').join()}'
+          'amix=inputs=${extras.length + 1}:duration=first:normalize=0[am]');
+      audioOut = 'am';
     }
   }
   if (audioOut == null) {

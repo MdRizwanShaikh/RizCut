@@ -41,7 +41,7 @@ class Draft {
 
 MediaItem _legacyMedia(Map<String, Object?> source) {
   final s = VideoSource.fromJson(source);
-  return MediaItem(id: 'm0', source: s, kind: mediaKindFor(s.name.isEmpty ? s.location : s.name));
+  return MediaItem(id: 'm0', source: s, kind: mediaKindOf(s));
 }
 
 /// Drafts live only on this device (no login, no server).

@@ -2,6 +2,7 @@ import 'dart:ui' show Color, Offset;
 
 import 'clip_look.dart';
 import 'color_grade.dart';
+import 'layers.dart';
 import 'media.dart';
 
 /// Allowed playback speeds for a clip.
@@ -254,6 +255,9 @@ class Project {
   const Project({
     required this.clips,
     this.media = const [],
+    this.layers = const [],
+    this.mainFrame = FrameRect.full,
+    this.mainCover = false,
     this.canvas = CanvasRatio.original,
     this.background = BackgroundMode.blur,
     this.texts = const [],
@@ -285,6 +289,15 @@ class Project {
 
   /// Imported files the clips point to.
   final List<MediaItem> media;
+
+  /// Videos/photos shown over the main track in their own frames.
+  final List<Layer> layers;
+
+  /// Where the main track sits on the canvas (layouts shrink it).
+  final FrameRect mainFrame;
+
+  /// Main track fills [mainFrame] by cropping instead of fitting inside it.
+  final bool mainCover;
   final CanvasRatio canvas;
   final BackgroundMode background;
   final List<TextOverlay> texts;
@@ -362,6 +375,9 @@ class Project {
   Project copyWith({
     List<VideoClip>? clips,
     List<MediaItem>? media,
+    List<Layer>? layers,
+    FrameRect? mainFrame,
+    bool? mainCover,
     CanvasRatio? canvas,
     BackgroundMode? background,
     List<TextOverlay>? texts,
@@ -373,6 +389,9 @@ class Project {
       Project(
         clips: clips == null ? this.clips : List.unmodifiable(clips),
         media: media == null ? this.media : List.unmodifiable(media),
+        layers: layers == null ? this.layers : List.unmodifiable(layers),
+        mainFrame: mainFrame ?? this.mainFrame,
+        mainCover: mainCover ?? this.mainCover,
         canvas: canvas ?? this.canvas,
         background: background ?? this.background,
         texts: texts == null ? this.texts : List.unmodifiable(texts),
@@ -441,6 +460,60 @@ class Project {
   Project updateMedia(MediaItem item) => copyWith(
       media: [for (final m in media) m.id == item.id ? item : m]);
 
+  Project addLayer(Layer l) => copyWith(layers: [...layers, l]);
+
+  Project updateLayer(int i, Layer l) => copyWith(layers: [...layers]..[i] = l);
+
+  Project removeLayer(int i) => copyWith(layers: [...layers]..removeAt(i));
+
+  /// A new split-screen project: [items][0] fills the main slot, the rest
+  /// become layers; every slot runs for the shortest video's length.
+  static Project fromLayout(LayoutTemplate tpl, List<MediaItem> items,
+      {String captionText = 'Write your caption'}) {
+    assert(items.isNotEmpty);
+    final len = layoutLength(items.take(tpl.slotCount).toList());
+    final main = items.first;
+    final mainClip = VideoClip(
+      mediaId: main.id,
+      sourceIn: Duration.zero,
+      sourceOut: main.isImage || main.duration < len ? (main.isImage ? len : main.duration) : len,
+    );
+    final layers = <Layer>[
+      for (var i = 1; i < tpl.slotCount && i < items.length; i++)
+        Layer(
+          id: 'L$i-${items[i].id}',
+          mediaId: items[i].id,
+          start: Duration.zero,
+          sourceIn: Duration.zero,
+          sourceOut: items[i].isImage || items[i].duration > len
+              ? len
+              : items[i].duration,
+          frame: tpl.slots[i],
+        ),
+    ];
+    return Project(
+      media: List.unmodifiable(items),
+      clips: List.unmodifiable([mainClip]),
+      layers: List.unmodifiable(layers),
+      mainFrame: tpl.slots.first,
+      mainCover: tpl.mainCover,
+      canvas: tpl.square ? CanvasRatio.square : CanvasRatio.portrait,
+      background: BackgroundMode.black,
+      texts: List.unmodifiable([
+        if (tpl.captionY != null)
+          TextOverlay(
+            text: captionText,
+            start: Duration.zero,
+            end: mainClip.timelineLength,
+            band: 0xFFFFE14D,
+            color: const Color(0xFF111111),
+            position: Offset(0.5, tpl.captionY!),
+            sizeFraction: 0.045,
+          ),
+      ]),
+    );
+  }
+
   Project addText(TextOverlay t) => copyWith(texts: [...texts, t]);
 
   Project updateText(int i, TextOverlay t) =>
@@ -452,6 +525,9 @@ class Project {
         'v': 2,
         'media': [for (final m in media) m.toJson()],
         'canvas': canvas.name,
+        if (layers.isNotEmpty) 'layers': [for (final l in layers) l.toJson()],
+        if (!mainFrame.isFull) 'mainFrame': mainFrame.toJson(),
+        if (mainCover) 'mainCover': true,
         'bg': background.name,
         'clips': [for (final c in clips) c.toJson()],
         'texts': [for (final t in texts) t.toJson()],
@@ -469,6 +545,14 @@ class Project {
                 for (final m in j['media'] as List)
                   MediaItem.fromJson((m as Map).cast()),
               ]),
+        layers: List.unmodifiable([
+          for (final l in (j['layers'] as List?) ?? const [])
+            Layer.fromJson((l as Map).cast()),
+        ]),
+        mainFrame: j['mainFrame'] == null
+            ? FrameRect.full
+            : FrameRect.fromJson(j['mainFrame'] as List),
+        mainCover: j['mainCover'] as bool? ?? false,
         canvas: CanvasRatio.values.asNameMap()[j['canvas']] ??
             CanvasRatio.original,
         background: BackgroundMode.values.asNameMap()[j['bg']] ??

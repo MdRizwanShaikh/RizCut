@@ -11,6 +11,13 @@ MediaKind mediaKindFor(String name) {
   return kImageExtensions.contains(ext) ? MediaKind.image : MediaKind.video;
 }
 
+/// Kind of a picked source: from its name if that has an extension,
+/// otherwise from its path/URL.
+MediaKind mediaKindOf(VideoSource s) {
+  final name = s.name.contains('.') ? s.name : s.location.split('?').first;
+  return mediaKindFor(name);
+}
+
 /// Default length of a photo when added to the timeline.
 const kDefaultPhotoLength = Duration(seconds: 3);
 
