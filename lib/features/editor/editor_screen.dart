@@ -87,6 +87,9 @@ class _EditorScreenState extends State<EditorScreen> {
   final _audioPlayers = <String, VideoPlayerController>{};
   int? _selectedLayer;
 
+  /// Which toolbar category is open.
+  _ToolGroup _group = _ToolGroup.edit;
+
   /// Player of the clip under the playhead (null on a photo clip).
   VideoPlayerController? _active;
   VideoPlayerController? _music;
@@ -1902,6 +1905,60 @@ class _EditorScreenState extends State<EditorScreen> {
 
   Widget _toolbar() {
     final textSelected = _selectedText != null;
+    final textTool = _Tool(
+      icon: textSelected ? Icons.edit : Icons.text_fields,
+      label: textSelected
+          ? (p.texts[_selectedText!].isSticker ? 'Edit sticker' : 'Edit text')
+          : 'Text',
+      color: RizColors.pink,
+      onTap: () => _addOrEditText(_selectedText),
+    );
+    final layerTool = _Tool(
+      icon: _selectedLayer != null ? Icons.tune : Icons.layers_outlined,
+      label: _selectedLayer != null ? 'Edit layer' : 'Layer',
+      color: const Color(0xFFFFB36B),
+      onTap: () => _selectedLayer != null ? _editLayer(_selectedLayer!) : _addLayer(),
+    );
+    final groups = <_ToolGroup, List<Widget>>{
+      _ToolGroup.edit: [
+        _Tool(icon: Icons.add_photo_alternate_outlined, label: 'Add', color: RizColors.cyan, onTap: _addMediaSheet),
+        _Tool(icon: Icons.content_cut, label: 'Split', color: RizColors.magenta, onTap: _split),
+        _Tool(icon: Icons.speed, label: 'Speed', color: RizColors.cyan, onTap: _speed),
+        _Tool(icon: Icons.crop_rotate, label: 'Edit', color: const Color(0xFF9DFF6B), onTap: _editLook),
+        _Tool(icon: Icons.volume_up_outlined, label: 'Volume', color: RizColors.pink, onTap: _clipVolume),
+        _Tool(icon: Icons.history, label: 'Reverse', color: RizColors.violet, onTap: _reverse),
+        _Tool(icon: Icons.ac_unit, label: 'Freeze', color: RizColors.cyan, onTap: _freezeFrame),
+        _Tool(icon: Icons.blur_on, label: 'Transition', color: const Color(0xFF7DF9C2), onTap: _transition),
+        _Tool(icon: Icons.view_week_outlined, label: 'Arrange', color: RizColors.textDim, onTap: _arrange),
+        _Tool(icon: Icons.delete_outline, label: 'Delete', color: const Color(0xFFFF5C7A), onTap: _delete),
+      ],
+      _ToolGroup.audio: [
+        _Tool(icon: Icons.music_note, label: 'Music', color: RizColors.blue, onTap: _audio),
+        _Tool(icon: Icons.mic_none, label: 'Voiceover', color: RizColors.cyan, onTap: _voiceover),
+        _Tool(icon: Icons.graphic_eq, label: 'Sound FX', color: RizColors.blue, onTap: _soundEffect),
+        _Tool(icon: Icons.volume_up_outlined, label: 'Volume', color: RizColors.pink, onTap: _clipVolume),
+      ],
+      _ToolGroup.text: [
+        textTool,
+        _Tool(icon: Icons.emoji_emotions_outlined, label: 'Stickers', color: const Color(0xFFFFD54F), onTap: () => _stickers()),
+        _Tool(icon: Icons.delete_outline, label: 'Delete', color: const Color(0xFFFF5C7A), onTap: _delete),
+      ],
+      _ToolGroup.overlay: [
+        layerTool,
+        _Tool(icon: Icons.dashboard_customize_outlined, label: 'Layout', color: const Color(0xFFFFE14D), onTap: _applyLayout),
+        _Tool(icon: Icons.delete_outline, label: 'Delete', color: const Color(0xFFFF5C7A), onTap: _delete),
+      ],
+      _ToolGroup.style: [
+        _Tool(icon: Icons.auto_awesome, label: 'Filters', color: RizColors.violet, onTap: _filters),
+        _Tool(icon: Icons.aspect_ratio, label: 'Canvas', color: const Color(0xFFFFB36B), onTap: _canvas),
+      ],
+    };
+    // Selecting something jumps to the tools for it.
+    final group = _selectedText != null
+        ? _ToolGroup.text
+        : _selectedLayer != null
+            ? _ToolGroup.overlay
+            : _group;
     return SafeArea(
       top: false,
       child: Container(
@@ -1909,49 +1966,63 @@ class _EditorScreenState extends State<EditorScreen> {
           color: RizColors.surface,
           border: Border(top: BorderSide(color: RizColors.outline)),
         ),
-        padding: const EdgeInsets.symmetric(vertical: 10),
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: 6),
-          child: Row(
-            children: [
-              _Tool(icon: Icons.add_photo_alternate_outlined, label: 'Add', color: RizColors.cyan, onTap: _addMediaSheet),
-              _Tool(icon: Icons.dashboard_customize_outlined, label: 'Layout', color: const Color(0xFFFFE14D), onTap: _applyLayout),
-              _Tool(
-                icon: _selectedLayer != null ? Icons.tune : Icons.layers_outlined,
-                label: _selectedLayer != null ? 'Edit layer' : 'Layer',
-                color: const Color(0xFFFFB36B),
-                onTap: () => _selectedLayer != null ? _editLayer(_selectedLayer!) : _addLayer(),
+        padding: const EdgeInsets.only(top: 8, bottom: 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              height: 76,
+              child: ListView(
+                key: ValueKey(group),
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                children: groups[group]!,
               ),
-              _Tool(icon: Icons.aspect_ratio, label: 'Canvas', color: const Color(0xFFFFB36B), onTap: _canvas),
-              _Tool(icon: Icons.crop_rotate, label: 'Edit', color: const Color(0xFF9DFF6B), onTap: _editLook),
-              _Tool(icon: Icons.content_cut, label: 'Split', color: RizColors.magenta, onTap: _split),
-              _Tool(icon: Icons.history, label: 'Reverse', color: RizColors.violet, onTap: _reverse),
-              _Tool(icon: Icons.ac_unit, label: 'Freeze', color: RizColors.cyan, onTap: _freezeFrame),
-              _Tool(icon: Icons.speed, label: 'Speed', color: RizColors.cyan, onTap: _speed),
-              _Tool(icon: Icons.auto_awesome, label: 'Filters', color: RizColors.violet, onTap: _filters),
-              _Tool(icon: Icons.mic_none, label: 'Voiceover', color: RizColors.cyan, onTap: _voiceover),
-              _Tool(icon: Icons.graphic_eq, label: 'Sound FX', color: RizColors.blue, onTap: _soundEffect),
-              _Tool(icon: Icons.volume_up_outlined, label: 'Volume', color: RizColors.pink, onTap: _clipVolume),
-              _Tool(icon: Icons.music_note, label: 'Audio', color: RizColors.blue, onTap: _audio),
-              _Tool(
-                icon: textSelected ? Icons.edit : Icons.text_fields,
-                label: textSelected
-                  ? (p.texts[_selectedText!].isSticker ? 'Edit sticker' : 'Edit text')
-                  : 'Text',
-                color: RizColors.pink,
-                onTap: () => _addOrEditText(_selectedText),
-              ),
-              _Tool(icon: Icons.emoji_emotions_outlined, label: 'Stickers', color: const Color(0xFFFFD54F), onTap: () => _stickers()),
-              _Tool(icon: Icons.view_week_outlined, label: 'Arrange', color: RizColors.textDim, onTap: _arrange),
-              _Tool(icon: Icons.blur_on, label: 'Transition', color: const Color(0xFF7DF9C2), onTap: _transition),
-              _Tool(icon: Icons.delete_outline, label: 'Delete', color: const Color(0xFFFF5C7A), onTap: _delete),
-            ],
-          ),
+            ),
+            const SizedBox(height: 4),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                for (final g in _ToolGroup.values)
+                  InkWell(
+                    key: Key('group-${g.name}'),
+                    borderRadius: BorderRadius.circular(10),
+                    onTap: () => setState(() {
+                      _group = g;
+                      _selectedText = null;
+                      _selectedLayer = null;
+                    }),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      child: Text(
+                        g.label,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: g == group ? FontWeight.w700 : FontWeight.w500,
+                          color: g == group ? RizColors.text : RizColors.textDim,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ],
         ),
       ),
     );
   }
+}
+
+/// Toolbar categories (like the big editors' bottom tabs).
+enum _ToolGroup {
+  edit('Edit'),
+  audio('Audio'),
+  text('Text'),
+  overlay('Overlay'),
+  style('Style');
+
+  const _ToolGroup(this.label);
+  final String label;
 }
 
 Duration _minDur(Duration a, Duration b) => a < b ? a : b;
