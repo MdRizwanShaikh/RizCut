@@ -13,7 +13,8 @@ void main() {
   // Show the bundled font's licence on the Licenses page.
   LicenseRegistry.addLicense(() async* {
     yield LicenseEntryWithLineBreaks(
-        const ['Poppins'], await rootBundle.loadString('assets/fonts/OFL-Poppins.txt'));
+        const ['Noto Sans', 'Noto Sans Devanagari'],
+        await rootBundle.loadString('assets/fonts/OFL-Noto.txt'));
   });
   // Optional login/backup; a no-op when Firebase isn't configured.
   CloudService.instance.init();

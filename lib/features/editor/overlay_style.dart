@@ -33,7 +33,8 @@ TextSpan overlaySpan(TextOverlay o, double fontSize) {
     text: o.text,
     style: TextStyle(
       color: o.color,
-      fontFamily: 'Poppins',
+      fontFamily: 'NotoSans',
+      fontFamilyFallback: const ['NotoSansDevanagari'],
       fontSize: fontSize,
       fontWeight: o.isBand ? FontWeight.w900 : FontWeight.w800,
       height: 1.15,

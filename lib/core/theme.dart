@@ -26,6 +26,10 @@ abstract final class RizColors {
   static const clipColors = [violet, blue, magenta, Color(0xFF5B5BFF)];
 }
 
+/// App font: Noto Sans, with Noto Sans Devanagari for Hindi.
+const kAppFont = 'NotoSans';
+const kAppFontFallback = ['NotoSansDevanagari'];
+
 ThemeData buildRizCutTheme() {
   const scheme = ColorScheme.dark(
     primary: RizColors.magenta,
@@ -43,7 +47,8 @@ ThemeData buildRizCutTheme() {
   final base = ThemeData(
     useMaterial3: true,
     colorScheme: scheme,
-    fontFamily: 'Poppins',
+    fontFamily: kAppFont,
+    fontFamilyFallback: kAppFontFallback,
   );
   return base.copyWith(
     scaffoldBackgroundColor: RizColors.bg,
