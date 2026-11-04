@@ -33,7 +33,7 @@ TextSpan overlaySpan(TextOverlay o, double fontSize) {
     text: o.text,
     style: TextStyle(
       color: o.color,
-      fontFamily: 'Inter',
+      fontFamily: 'Poppins',
       fontSize: fontSize,
       fontWeight: o.isBand ? FontWeight.w900 : FontWeight.w800,
       height: 1.15,

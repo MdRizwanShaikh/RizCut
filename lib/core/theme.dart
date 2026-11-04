@@ -43,7 +43,7 @@ ThemeData buildRizCutTheme() {
   final base = ThemeData(
     useMaterial3: true,
     colorScheme: scheme,
-    fontFamily: 'Inter',
+    fontFamily: 'Poppins',
   );
   return base.copyWith(
     scaffoldBackgroundColor: RizColors.bg,
