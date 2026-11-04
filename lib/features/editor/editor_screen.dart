@@ -20,6 +20,7 @@ import 'look_sheet.dart';
 import 'filter_sheet.dart';
 import '../../services/ffmpeg/media_tools.dart';
 import '../../services/thumbs/thumbnailer.dart';
+import '../../services/waveform/waveform.dart';
 import 'chroma_preview.dart';
 import 'image_provider.dart';
 import 'keyframes.dart';
@@ -100,6 +101,10 @@ class _EditorScreenState extends State<EditorScreen> {
   /// Video frame thumbnails by "mediaId@ms".
   final _thumbs = <String, ImageProvider>{};
   final _thumbsPending = <String>{};
+
+  /// Waveform peaks: `m:mediaId` for clips, `a:audioId` for audio.
+  final _peaks = <String, List<double>>{};
+  final _peaksPending = <String>{};
 
   /// Drives playback through photo clips.
   Timer? _photoTimer;
@@ -324,6 +329,7 @@ class _EditorScreenState extends State<EditorScreen> {
     _syncLayerPlayers();
     _syncAudioPlayers();
     _loadThumbs();
+    _loadPeaks();
     if (save) {
       _dirty = true;
       _saveTimer?.cancel();
@@ -345,6 +351,22 @@ class _EditorScreenState extends State<EditorScreen> {
         _thumbsPending.remove(key);
         if (img != null && mounted) setState(() => _thumbs[key] = img);
       });
+    }
+  }
+
+  void _loadPeaks() {
+    if (_project == null) return;
+    void want(String key, String loc, {bool isUrl = false, bool isAsset = false}) {
+      if (_peaks.containsKey(key) || !_peaksPending.add(key)) return;
+      audioPeaks(loc, isUrl: isUrl, isAsset: isAsset).then((v) {
+        if (v != null && mounted) setState(() => _peaks[key] = v);
+      });
+    }
+    for (final m in p.media) {
+      if (!m.isImage) want('m:${m.id}', m.source.location, isUrl: m.source.isUrl);
+    }
+    for (final a in p.audio) {
+      want('a:${a.id}', a.location, isUrl: a.isUrl, isAsset: a.isAsset);
     }
   }
 
@@ -1415,6 +1437,7 @@ class _EditorScreenState extends State<EditorScreen> {
                       }),
                       selectedLayer: _selectedLayer,
                       onTapAudio: _editAudio,
+                      peaksFor: (k) => _peaks[k],
                       onTapLayer: (i) => setState(() {
                         _selectedLayer = i;
                         _selectedText = null;

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme.dart';
+import '../../services/waveform/waveform.dart';
 import 'audio_track.dart';
 import 'project.dart';
 import 'stickers.dart';
@@ -29,6 +30,7 @@ class Timeline extends StatefulWidget {
     this.selectedLayer,
     this.onTapLayer,
     this.onTapAudio,
+    this.peaksFor,
   });
 
   final Project project;
@@ -54,6 +56,9 @@ class Timeline extends StatefulWidget {
   final int? selectedLayer;
   final ValueChanged<int>? onTapLayer;
   final ValueChanged<int>? onTapAudio;
+
+  /// Audio peaks by key (`m:mediaId` or `a:audioId`), for waveforms.
+  final List<double>? Function(String key)? peaksFor;
 
   @override
   State<Timeline> createState() => _TimelineState();
@@ -176,6 +181,7 @@ class _TimelineState extends State<Timeline> {
                                 onTap: () => widget.onTapClip(i),
                                 onLongPress: () => widget.onLongPressClip(i),
                                 child: _ClipTile(
+                                  peaks: widget.peaksFor?.call('m:${p.clips[i].mediaId}'),
                                   clip: p.clips[i],
                                   thumb: widget.thumbFor?.call(p.clips[i]),
                                   width: _px(p.clips[i].timelineLength),
@@ -227,6 +233,7 @@ class _TimelineState extends State<Timeline> {
                                       .clamp(0, _maxLanes - 1),
                               height: _laneHeight - 4,
                               child: _AudioBar(
+                                peaks: widget.peaksFor?.call('a:${p.audio[k].id}'),
                                 clip: p.audio[k],
                                 onTap: () => widget.onTapAudio?.call(k),
                               ),
@@ -359,8 +366,9 @@ class _Diamond extends StatelessWidget {
 }
 
 class _AudioBar extends StatelessWidget {
-  const _AudioBar({required this.clip, required this.onTap});
+  const _AudioBar({required this.clip, required this.onTap, this.peaks});
   final AudioClip clip;
+  final List<double>? peaks;
   final VoidCallback onTap;
 
   @override
@@ -376,7 +384,17 @@ class _AudioBar extends StatelessWidget {
           borderRadius: BorderRadius.circular(8),
           border: Border.all(color: c),
         ),
-        child: Row(
+        foregroundDecoration: null,
+        child: Stack(
+          children: [
+            if (peaks != null)
+              Positioned.fill(
+                child: CustomPaint(
+                  painter: _WavePainter(peaks!, clip.sourceIn, clip.sourceOut,
+                      const Color(0x66FFFFFF)),
+                ),
+              ),
+            Row(
           children: [
             Icon(clip.kind == AudioKind.voiceover ? Icons.mic : Icons.graphic_eq,
                 size: 14, color: Colors.white),
@@ -386,6 +404,8 @@ class _AudioBar extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(color: Colors.white, fontSize: 12)),
+            ),
+          ],
             ),
           ],
         ),
@@ -468,6 +488,7 @@ class _Ruler extends StatelessWidget {
 
 class _ClipTile extends StatelessWidget {
   const _ClipTile({
+    this.peaks,
     required this.clip,
     this.thumb,
     required this.width,
@@ -476,6 +497,7 @@ class _ClipTile extends StatelessWidget {
   });
 
   final VideoClip clip;
+  final List<double>? peaks;
   final ImageProvider? thumb;
   final double width;
   final Color color;
@@ -524,7 +546,18 @@ class _ClipTile extends StatelessWidget {
         ),
       ),
       child: ClipRect(
-        child: Row(
+        child: Stack(
+          children: [
+            if (peaks != null && clip.volume > 0)
+              Positioned.fill(
+                top: 26,
+                child: CustomPaint(
+                  painter: _WavePainter(peaks!, clip.sourceIn, clip.sourceOut,
+                      const Color(0x88FFFFFF)),
+                ),
+              ),
+            Positioned.fill(
+              child: Row(
           children: [
             const Icon(Icons.movie, size: 16, color: Colors.white70),
             const SizedBox(width: 4),
@@ -550,6 +583,9 @@ class _ClipTile extends StatelessWidget {
                     style: const TextStyle(color: Colors.white, fontSize: 11)),
               ),
             ],
+          ],
+              ),
+            ),
           ],
         ),
       ),
@@ -620,4 +656,41 @@ class _TransitionBadge extends StatelessWidget {
           size: 14, color: white ? RizColors.bg : const Color(0xFF7DF9C2)),
     );
   }
+}
+
+/// Draws loudness bars for [from]..[to] of a source across the box.
+class _WavePainter extends CustomPainter {
+  _WavePainter(this.peaks, this.from, this.to, this.color);
+  final List<double> peaks;
+  final Duration from, to;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (peaks.isEmpty || size.width <= 0) return;
+    final a = (from.inMicroseconds / 1e6 * kPeaksPerSecond).floor().clamp(0, peaks.length);
+    final b = (to.inMicroseconds / 1e6 * kPeaksPerSecond).ceil().clamp(a, peaks.length);
+    if (b <= a) return;
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 2
+      ..strokeCap = StrokeCap.round;
+    final bars = (size.width / 3).floor().clamp(1, 2000);
+    final mid = size.height / 2;
+    for (var i = 0; i < bars; i++) {
+      final s = a + ((b - a) * i / bars).floor();
+      final e = (a + ((b - a) * (i + 1) / bars).ceil()).clamp(s + 1, b);
+      var m = 0.0;
+      for (var j = s; j < e; j++) {
+        if (peaks[j] > m) m = peaks[j];
+      }
+      final h = (m * size.height).clamp(1.0, size.height) / 2;
+      final x = i * 3 + 1.5;
+      canvas.drawLine(Offset(x, mid - h), Offset(x, mid + h), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_WavePainter old) =>
+      old.peaks != peaks || old.from != from || old.to != to;
 }

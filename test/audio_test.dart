@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rizcut/features/editor/audio_track.dart';
 import 'package:rizcut/features/editor/project.dart';
 import 'package:rizcut/services/ffmpeg/export_command.dart';
+import 'package:rizcut/services/waveform/waveform.dart';
 
 void main() {
   const clip = VideoClip(
@@ -40,4 +41,13 @@ void main() {
   test('every built-in effect has an asset path', () {
     expect(kSoundEffects.map((e) => e.asset), everyElement(startsWith('assets/sfx/')));
   });
+
+  test('pcm peaks: one value per 1/50 s, normalised', () {
+    final samples = [for (var i = 0; i < 2000; i++) i < 1000 ? 16384 : -32768];
+    final peaks = peaksFromPcm(samples, 2000);
+    expect(peaks, hasLength(50));
+    expect(peaks.first, closeTo(0.5, 1e-9));
+    expect(peaks.last, closeTo(1.0, 1e-9));
+  });
 }
+
