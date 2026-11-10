@@ -9,6 +9,7 @@ import 'package:video_player/video_player.dart';
 
 import '../../core/theme.dart';
 import 'audio_track.dart';
+import 'video_source.dart' show kPlayerOptions;
 
 /// Result of a voiceover take.
 class VoiceoverTake {
@@ -160,7 +161,7 @@ class _SoundEffectsSheetState extends State<SoundEffectsSheet> {
     _preview = null;
     await old?.dispose();
     try {
-      final c = VideoPlayerController.asset(fx.asset);
+      final c = VideoPlayerController.asset(fx.asset, videoPlayerOptions: kPlayerOptions);
       await c.initialize();
       if (!mounted) {
         await c.dispose();

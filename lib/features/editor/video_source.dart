@@ -5,6 +5,11 @@ import 'video_source_stub.dart' if (dart.library.io) 'video_source_io.dart'
 import 'url_resolver_stub.dart'
     if (dart.library.js_interop) 'url_resolver_web.dart' as web;
 
+/// Every preview player mixes its sound with the others. Without this,
+/// Android gives each ExoPlayer audio focus in turn, so starting the video
+/// pauses the music, voiceover, sound-effect and layer players.
+final kPlayerOptions = VideoPlayerOptions(mixWithOthers: true);
+
 /// A picked video: a local file path (Android) or a URL (web blob / demo).
 class VideoSource {
   const VideoSource.file(this.location, {this.name = ''}) : isUrl = false;
@@ -30,11 +35,13 @@ class VideoSource {
   Future<VideoPlayerController> createController() async {
     if (!isUrl) return io.fileController(location);
     final url = await web.playableUrl(location);
-    return VideoPlayerController.networkUrl(Uri.parse(url));
+    return VideoPlayerController.networkUrl(Uri.parse(url),
+        videoPlayerOptions: kPlayerOptions);
   }
 
   /// Plain URL player, used if the blob copy can't be played (strict hosts).
   VideoPlayerController? directController() => isUrl
-      ? VideoPlayerController.networkUrl(Uri.parse(location))
+      ? VideoPlayerController.networkUrl(Uri.parse(location),
+          videoPlayerOptions: kPlayerOptions)
       : null;
 }

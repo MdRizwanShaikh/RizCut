@@ -481,7 +481,7 @@ class _EditorScreenState extends State<EditorScreen> {
       }
       try {
         final c = a.isAsset
-            ? VideoPlayerController.asset(a.location)
+            ? VideoPlayerController.asset(a.location, videoPlayerOptions: kPlayerOptions)
             : await (a.isUrl
                     ? VideoSource.url(a.location)
                     : VideoSource.file(a.location))
@@ -613,13 +613,15 @@ class _EditorScreenState extends State<EditorScreen> {
     _syncLayers(seek: true);
   }
 
-  void _play() {
+  Future<void> _play() async {
     if (_t >= p.duration - const Duration(milliseconds: 50)) {
       _seek(Duration.zero);
     }
     final hit = p.hitTest(_t)!;
     setState(() => _playing = true);
-    _enterClip(hit.index, hit.sourcePosition, play: true);
+    // Start the video first, then music/layers/audio, so they line up.
+    await _enterClip(hit.index, hit.sourcePosition, play: true);
+    if (!mounted || !_playing) return;
     _syncMusicPosition(play: true);
     _syncLayers(seek: true);
   }
