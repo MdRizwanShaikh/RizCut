@@ -10,6 +10,9 @@ abstract final class MediaTools {
 
   /// A JPEG of the frame at [at].
   static Future<String?> frame(String path, Duration at) => impl.frame(path, at);
+
+  /// The sound of a video as an .m4a file (null if it has no audio).
+  static Future<String?> extractAudio(String path) => impl.extractAudio(path);
 }
 
 /// Reversing holds the whole clip in memory, so keep it short.

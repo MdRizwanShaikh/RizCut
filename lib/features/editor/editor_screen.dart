@@ -94,6 +94,7 @@ class _EditorScreenState extends State<EditorScreen> {
   VideoPlayerController? _active;
   VideoPlayerController? _music;
   String? _musicLoc;
+  double _musicVolume = -1;
   Project? _project;
   final _undo = <Project>[];
   final _redo = <Project>[];
@@ -371,6 +372,8 @@ class _EditorScreenState extends State<EditorScreen> {
     for (final a in p.audio) {
       want('a:${a.id}', a.location, isUrl: a.isUrl, isAsset: a.isAsset);
     }
+    final music = p.music;
+    if (music != null) want('music:${music.location}', music.location, isUrl: music.isUrl);
   }
 
   ImageProvider? _thumbFor(VideoClip c) {
@@ -394,7 +397,9 @@ class _EditorScreenState extends State<EditorScreen> {
   Future<void> _syncMusicSource() async {
     final track = p.music;
     if (track?.location == _musicLoc) {
-      await _music?.setVolume(track?.volume ?? 0);
+      _musicVolume = -1;
+      _applyMusicVolume();
+      if (_playing) _syncMusicPosition(play: true);
       return;
     }
     final old = _music;
@@ -410,12 +415,14 @@ class _EditorScreenState extends State<EditorScreen> {
           .createController();
       await ctrl.initialize();
       await ctrl.setLooping(true);
-      await ctrl.setVolume(track.volume);
       if (!mounted || _musicLoc != track.location) {
         await ctrl.dispose();
         return;
       }
       _music = ctrl;
+      _musicVolume = -1;
+      _applyMusicVolume();
+      if (mounted) setState(() {});
       if (_playing) _syncMusicPosition(play: true);
     } catch (_) {
       await ctrl?.dispose();
@@ -423,12 +430,37 @@ class _EditorScreenState extends State<EditorScreen> {
     }
   }
 
+  /// Music volume right now: ducked while a voiceover plays.
+  void _applyMusicVolume() {
+    final m = _music, track = _project?.music;
+    if (m == null || track == null) return;
+    final ducked = track.duck &&
+        p.audio.any((a) => a.kind == AudioKind.voiceover && a.activeAt(_t));
+    final v = (track.volume * (ducked ? MusicTrack.duckLevel : 1)).clamp(0.0, 1.0);
+    if (v == _musicVolume) return;
+    _musicVolume = v;
+    m.setVolume(v);
+  }
+
+  /// Re-seeks the music if it drifted from the video (clip switches pause
+  /// the video for a moment, the music keeps going).
+  void _fixMusicDrift() {
+    final m = _music, track = _project?.music;
+    if (!_playing || m == null || track == null || !m.value.isPlaying) return;
+    final len = m.value.duration;
+    if (len <= Duration.zero) return;
+    final want = track.positionAt(_t, len);
+    final diff = (m.value.position - want).inMilliseconds.abs();
+    // Ignore the wrap-around at the loop point.
+    if (diff > 700 && diff < len.inMilliseconds - 700) m.seekTo(want);
+  }
+
   void _syncMusicPosition({required bool play}) {
     final m = _music;
     if (m == null || !m.value.isInitialized) return;
-    final len = m.value.duration.inMicroseconds;
-    if (len > 0) {
-      m.seekTo(Duration(microseconds: _t.inMicroseconds % len));
+    final track = p.music;
+    if (track != null && m.value.duration > Duration.zero) {
+      m.seekTo(track.positionAt(_t, m.value.duration));
     }
     play ? m.play() : m.pause();
   }
@@ -500,6 +532,8 @@ class _EditorScreenState extends State<EditorScreen> {
   /// Keeps layer players in step with the playhead.
   void _syncLayers({bool seek = false}) {
     if (_project == null) return;
+    _applyMusicVolume();
+    _fixMusicDrift();
     for (final a in p.audio) {
       final c = _audioPlayers[a.id];
       if (c == null || !c.value.isInitialized) continue;
@@ -1442,6 +1476,7 @@ class _EditorScreenState extends State<EditorScreen> {
                       }),
                       selectedLayer: _selectedLayer,
                       onTapAudio: _editAudio,
+                      onTapMusic: _audio,
                       peaksFor: (k) => _peaks[k],
                       onTapLayer: (i) => setState(() {
                         _selectedLayer = i;

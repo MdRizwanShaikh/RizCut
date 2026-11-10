@@ -254,23 +254,58 @@ class MusicTrack {
     required this.isUrl,
     this.name = '',
     this.volume = 0.8,
-    this.fade = true,
+    this.offset = Duration.zero,
+    this.fadeIn = MusicTrack.kDefaultMusicFade,
+    this.fadeOut = MusicTrack.kDefaultMusicFade,
+    this.duck = true,
   });
+
+  static const kDefaultMusicFade = Duration(milliseconds: 1500);
+  static const kMaxFade = Duration(seconds: 5);
 
   final String location;
   final bool isUrl;
   final String name;
   final double volume;
 
-  /// Fade in at the start and out at the end of the video.
-  final bool fade;
+  /// Where in the song the music starts (the first pass); later loops start
+  /// from the beginning of the file, like FFmpeg's `-ss` + `-stream_loop`.
+  final Duration offset;
 
-  MusicTrack copyWith({double? volume, bool? fade}) => MusicTrack(
+  /// Fade in at the start and out at the end of the video. Zero = no fade.
+  final Duration fadeIn, fadeOut;
+
+  /// Lower the music while a voiceover plays.
+  final bool duck;
+
+  /// Volume multiplier while a voiceover plays.
+  static const duckLevel = 0.3;
+
+  /// Position in the song file at timeline time [t], given the song length.
+  Duration positionAt(Duration t, Duration length) {
+    if (length <= Duration.zero) return Duration.zero;
+    final first = length - offset;
+    if (first > Duration.zero && t < first) return offset + t;
+    final rest = first > Duration.zero ? t - first : t;
+    return Duration(microseconds: rest.inMicroseconds % length.inMicroseconds);
+  }
+
+  MusicTrack copyWith({
+    double? volume,
+    Duration? offset,
+    Duration? fadeIn,
+    Duration? fadeOut,
+    bool? duck,
+  }) =>
+      MusicTrack(
         location: location,
         isUrl: isUrl,
         name: name,
         volume: volume ?? this.volume,
-        fade: fade ?? this.fade,
+        offset: offset ?? this.offset,
+        fadeIn: fadeIn ?? this.fadeIn,
+        fadeOut: fadeOut ?? this.fadeOut,
+        duck: duck ?? this.duck,
       );
 
   Map<String, Object?> toJson() => {
@@ -278,16 +313,31 @@ class MusicTrack {
         'url': isUrl,
         'name': name,
         'vol': volume,
-        'fade': fade,
+        'off': offset.inMilliseconds,
+        'fin': fadeIn.inMilliseconds,
+        'fout': fadeOut.inMilliseconds,
+        'duck': duck,
       };
 
-  factory MusicTrack.fromJson(Map<String, Object?> j) => MusicTrack(
-        location: j['loc'] as String,
-        isUrl: j['url'] as bool? ?? false,
-        name: j['name'] as String? ?? '',
-        volume: (j['vol'] as num?)?.toDouble() ?? 0.8,
-        fade: j['fade'] as bool? ?? true,
-      );
+  factory MusicTrack.fromJson(Map<String, Object?> j) {
+    // Old drafts stored one on/off `fade` flag.
+    final legacy = (j['fade'] as bool? ?? true) ? kDefaultMusicFade : Duration.zero;
+    Duration ms(String k, Duration d) {
+      final v = j[k] as num?;
+      return v == null ? d : Duration(milliseconds: v.round());
+    }
+
+    return MusicTrack(
+      location: j['loc'] as String,
+      isUrl: j['url'] as bool? ?? false,
+      name: j['name'] as String? ?? '',
+      volume: (j['vol'] as num?)?.toDouble() ?? 0.8,
+      offset: ms('off', Duration.zero),
+      fadeIn: ms('fin', legacy),
+      fadeOut: ms('fout', legacy),
+      duck: j['duck'] as bool? ?? true,
+    );
+  }
 }
 
 /// Where a timeline time lands: which clip and which source position.

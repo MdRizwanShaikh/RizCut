@@ -153,7 +153,9 @@ STYLE
 • Canvas for every app: 9:16, 1:1, 16:9, 4:5 with blurred or solid background
 
 SOUND
-• Add music from your phone, set volume, fade in and out
+• Add music from your phone or use the sound from any video
+• Pick where the song starts, set volume and fade in/out length
+• Music lowers itself automatically under your voiceover
 • Record a voiceover while the video plays
 • Built-in sound effects: whoosh, pop, ding, click, boom, rise
 • Volume for every clip (mute or boost to 200%) and audio waveforms

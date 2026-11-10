@@ -93,7 +93,14 @@ class _FfmpegExporter implements ProjectExporter {
     final track = project.music;
     final music = track == null || track.isUrl
         ? null
-        : MusicInput(path: track.location, volume: track.volume, fade: track.fade);
+        : MusicInput(
+            path: track.location,
+            volume: track.volume,
+            offset: track.offset,
+            fadeIn: track.fadeIn,
+            fadeOut: track.fadeOut,
+            duck: track.duck,
+          );
 
     // Voiceovers / sound effects: built-in effects are copied out of the
     // app bundle so FFmpeg can read them.

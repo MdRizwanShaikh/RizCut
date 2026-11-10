@@ -14,10 +14,10 @@ is what the app does today.
 | Export resolution + bitrate control | ✅ 480p–4K, 24/30/60 fps, 3 quality levels, size estimate | ✅ | — | — | ✅ | — |
 | Canvas resize + background blur | ✅ 5 ratios, blur/colour | — | ✅ | — | — | — |
 | Stickers | ✅ | — | ✅ | — | — | — |
-| Music | ✅ your own files | — | ✅ trending | — | — | — |
+| Music | ✅ your own files, sound from any video, choose start point | — | ✅ trending | — | — | — |
 | Sound effects | ✅ 6 built-in | — | — | — | — | — |
 | Voiceover recording | ✅ | — | — | — | — | — |
-| Advanced audio mixing | ✅ clip volume, music fade, layer sound, voiceover, SFX | — | — | — | — | ✅ |
+| Advanced audio mixing | ✅ clip volume, music fade in/out, auto-duck under voiceover, layer sound, voiceover, SFX | — | — | — | — | ✅ |
 | Green screen (chroma key) | ✅ green / blue | — | — | ✅ | — | — |
 | Colour grading / filters | ✅ 8 presets + brightness/contrast/saturation, per layer | — | — | ✅ | — | — |
 | Video stabilisation | ✅ | — | — | — | — | ✅ |

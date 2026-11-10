@@ -41,3 +41,11 @@ Future<String?> frame(String path, Duration at) async {
   final out = await _out('frame.jpg');
   return _run(['-y', '-ss', _s(at), '-i', path, '-frames:v', '1', '-q:v', '2', out], out);
 }
+
+Future<String?> extractAudio(String path) async {
+  final out = await _out('sound.m4a');
+  // Copy AAC as is (fast); otherwise re-encode.
+  return await _run(['-y', '-i', path, '-vn', '-map', '0:a:0', '-c:a', 'copy', out], out) ??
+      await _run(
+          ['-y', '-i', path, '-vn', '-map', '0:a:0', '-c:a', 'aac', '-b:a', '192k', out], out);
+}

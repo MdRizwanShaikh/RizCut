@@ -30,6 +30,7 @@ class Timeline extends StatefulWidget {
     this.selectedLayer,
     this.onTapLayer,
     this.onTapAudio,
+    this.onTapMusic,
     this.peaksFor,
   });
 
@@ -56,6 +57,9 @@ class Timeline extends StatefulWidget {
   final int? selectedLayer;
   final ValueChanged<int>? onTapLayer;
   final ValueChanged<int>? onTapAudio;
+
+  /// Tap on the background-music bar.
+  final VoidCallback? onTapMusic;
 
   /// Audio peaks by key (`m:mediaId` or `a:audioId`), for waveforms.
   final List<double>? Function(String key)? peaksFor;
@@ -150,7 +154,9 @@ class _TimelineState extends State<Timeline> {
   Widget build(BuildContext context) {
     final p = widget.project;
     return SizedBox(
-      height: 106 + _laneHeight * _lanes(p).count.clamp(1, _maxLanes),
+      height: 106 +
+          _laneHeight * _lanes(p).count.clamp(1, _maxLanes) +
+          (p.music != null ? _laneHeight + 2 : 0),
       child: LayoutBuilder(builder: (context, box) {
         final half = box.maxWidth / 2;
         final active = widget.activeClip.clamp(0, p.clips.length - 1);
@@ -287,6 +293,19 @@ class _TimelineState extends State<Timeline> {
                         ],
                       ),
                     ),
+                    if (p.music != null) ...[
+                      const SizedBox(height: 2),
+                      SizedBox(
+                        width: _px(p.duration),
+                        height: _laneHeight - 4,
+                        child: _MusicBar(
+                          track: p.music!,
+                          duration: p.duration,
+                          peaks: widget.peaksFor?.call('music:${p.music!.location}'),
+                          onTap: widget.onTapMusic,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -412,6 +431,87 @@ class _AudioBar extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Background music across the whole video, with its (looping) waveform.
+class _MusicBar extends StatelessWidget {
+  const _MusicBar({required this.track, required this.duration, this.peaks, this.onTap});
+  final MusicTrack track;
+  final Duration duration;
+  final List<double>? peaks;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    const c = RizColors.blue;
+    return GestureDetector(
+      key: const Key('music-bar'),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6),
+        decoration: BoxDecoration(
+          color: c.withValues(alpha: 0.30),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: c),
+        ),
+        child: Stack(
+          children: [
+            if (peaks != null && peaks!.isNotEmpty)
+              Positioned.fill(
+                child: CustomPaint(
+                  painter: _MusicWavePainter(peaks!, track, duration, const Color(0x66FFFFFF)),
+                ),
+              ),
+            Row(
+              children: [
+                const Icon(Icons.music_note, size: 14, color: Colors.white),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(track.name.isEmpty ? 'Music' : track.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: Colors.white, fontSize: 12)),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MusicWavePainter extends CustomPainter {
+  _MusicWavePainter(this.peaks, this.track, this.duration, this.color);
+  final List<double> peaks;
+  final MusicTrack track;
+  final Duration duration;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (size.width <= 0 || duration <= Duration.zero) return;
+    final songLen = Duration(microseconds: (peaks.length * 1e6 / kPeaksPerSecond).round());
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 2
+      ..strokeCap = StrokeCap.round;
+    final bars = (size.width / 3).floor().clamp(1, 4000);
+    final mid = size.height / 2;
+    final step = duration.inMicroseconds / bars;
+    for (var i = 0; i < bars; i++) {
+      final t = Duration(microseconds: (i * step).round());
+      final pos = track.positionAt(t, songLen);
+      final k = (pos.inMicroseconds / 1e6 * kPeaksPerSecond).floor().clamp(0, peaks.length - 1);
+      final h = (peaks[k] * size.height).clamp(1.0, size.height) / 2;
+      final x = i * 3 + 1.5;
+      canvas.drawLine(Offset(x, mid - h), Offset(x, mid + h), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_MusicWavePainter old) =>
+      old.peaks != peaks || old.duration != duration || old.track.offset != track.offset;
 }
 
 class _LayerBar extends StatelessWidget {

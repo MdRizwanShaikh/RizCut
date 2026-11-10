@@ -4,6 +4,7 @@
 /// (and against a desktop ffmpeg binary).
 library;
 
+import '../../features/editor/audio_track.dart';
 import '../../features/editor/clip_look.dart';
 import '../../features/editor/color_grade.dart';
 import '../../features/editor/keyframes.dart';
@@ -213,10 +214,23 @@ String gradeFilter(ColorGrade grade) {
 
 /// Background music input for the export.
 class MusicInput {
-  const MusicInput({required this.path, this.volume = 0.8, this.fade = true});
+  const MusicInput({
+    required this.path,
+    this.volume = 0.8,
+    this.offset = Duration.zero,
+    this.fadeIn = const Duration(milliseconds: 1500),
+    this.fadeOut = const Duration(milliseconds: 1500),
+    this.duck = false,
+  });
   final String path;
   final double volume;
-  final bool fade;
+
+  /// Start point in the song (first pass; loops restart at 0).
+  final Duration offset;
+  final Duration fadeIn, fadeOut;
+
+  /// Lower the music to [MusicTrack.duckLevel] under voiceovers.
+  final bool duck;
 }
 
 /// What the exporter learned about one media file.
@@ -587,18 +601,26 @@ List<String> buildProjectExportArgs({
   final extras = [...layerAudio];
   if (music != null) {
     final idx = overlayBase + overlays.length;
-    final fadeOut = total > 3 ? 1.5 : total / 3;
+    // Fades never overlap: each is at most a third of the video.
+    double fadeLen(Duration d) => (d.inMicroseconds / 1e6).clamp(0, total / 3).toDouble();
+    final fin = fadeLen(music.fadeIn), fout = fadeLen(music.fadeOut);
+    final duckWindows = <String>[
+      if (music.duck)
+        for (final a in project.audio)
+          if (a.kind == AudioKind.voiceover && a.start < project.duration)
+            "volume=${_num(MusicTrack.duckLevel)}:enable='between(t,${_sec(a.start)},"
+                "${_sec(a.end < project.duration ? a.end : project.duration)})'",
+    ];
     final mf = <String>[
       'aresample=44100',
       'aformat=sample_rates=44100:channel_layouts=stereo',
       'atrim=0:${total.toStringAsFixed(3)}',
       'asetpts=PTS-STARTPTS',
       'volume=${_num(music.volume)}',
-      if (music.fade) ...[
-        'afade=t=in:st=0:d=${fadeOut.toStringAsFixed(3)}',
-        'afade=t=out:st=${(total - fadeOut).toStringAsFixed(3)}:'
-            'd=${fadeOut.toStringAsFixed(3)}',
-      ],
+      ...duckWindows,
+      if (fin > 0) 'afade=t=in:st=0:d=${fin.toStringAsFixed(3)}',
+      if (fout > 0)
+        'afade=t=out:st=${(total - fout).toStringAsFixed(3)}:d=${fout.toStringAsFixed(3)}',
     ];
     graph.add('[$idx:a]${mf.join(',')}[m]');
     extras.add('m');
@@ -658,7 +680,10 @@ List<String> buildProjectExportArgs({
     '-y',
     ...inputs,
     ...overlayInputs,
-    if (music != null) ...['-stream_loop', '-1', '-i', music.path],
+    if (music != null) ...[
+      if (music.offset > Duration.zero) ...['-ss', ffmpegSeconds(music.offset)],
+      '-stream_loop', '-1', '-i', music.path,
+    ],
     ...audioInputs,
     '-filter_complex', graph.join(';'),
     '-map', '[$last]',
