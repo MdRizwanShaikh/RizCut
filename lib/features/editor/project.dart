@@ -255,6 +255,7 @@ class MusicTrack {
     this.name = '',
     this.volume = 0.8,
     this.offset = Duration.zero,
+    this.end,
     this.fadeIn = MusicTrack.kDefaultMusicFade,
     this.fadeOut = MusicTrack.kDefaultMusicFade,
     this.duck = true,
@@ -268,9 +269,19 @@ class MusicTrack {
   final String name;
   final double volume;
 
-  /// Where in the song the music starts (the first pass); later loops start
-  /// from the beginning of the file, like FFmpeg's `-ss` + `-stream_loop`.
+  /// The selected part of the song, `[offset, end)`; only this part plays
+  /// and loops. [end] null = to the end of the song.
   final Duration offset;
+  final Duration? end;
+
+  /// The shortest part that can be selected.
+  static const minLoop = Duration(seconds: 1);
+
+  /// End of the selected part for a song of [length].
+  Duration loopEnd(Duration length) {
+    final e = end == null || end! > length ? length : end!;
+    return e - offset < minLoop ? offset + minLoop : e;
+  }
 
   /// Fade in at the start and out at the end of the video. Zero = no fade.
   final Duration fadeIn, fadeOut;
@@ -281,18 +292,19 @@ class MusicTrack {
   /// Volume multiplier while a voiceover plays.
   static const duckLevel = 0.3;
 
-  /// Position in the song file at timeline time [t], given the song length.
+  /// Position in the song file at timeline time [t], given the song length:
+  /// the selected part, repeated.
   Duration positionAt(Duration t, Duration length) {
     if (length <= Duration.zero) return Duration.zero;
-    final first = length - offset;
-    if (first > Duration.zero && t < first) return offset + t;
-    final rest = first > Duration.zero ? t - first : t;
-    return Duration(microseconds: rest.inMicroseconds % length.inMicroseconds);
+    final loop = (loopEnd(length) - offset).inMicroseconds;
+    return offset + Duration(microseconds: t.inMicroseconds % loop);
   }
 
   MusicTrack copyWith({
     double? volume,
     Duration? offset,
+    Duration? end,
+    bool clearEnd = false,
     Duration? fadeIn,
     Duration? fadeOut,
     bool? duck,
@@ -303,6 +315,7 @@ class MusicTrack {
         name: name,
         volume: volume ?? this.volume,
         offset: offset ?? this.offset,
+        end: clearEnd ? null : end ?? this.end,
         fadeIn: fadeIn ?? this.fadeIn,
         fadeOut: fadeOut ?? this.fadeOut,
         duck: duck ?? this.duck,
@@ -314,6 +327,7 @@ class MusicTrack {
         'name': name,
         'vol': volume,
         'off': offset.inMilliseconds,
+        if (end != null) 'end': end!.inMilliseconds,
         'fin': fadeIn.inMilliseconds,
         'fout': fadeOut.inMilliseconds,
         'duck': duck,
@@ -333,6 +347,7 @@ class MusicTrack {
       name: j['name'] as String? ?? '',
       volume: (j['vol'] as num?)?.toDouble() ?? 0.8,
       offset: ms('off', Duration.zero),
+      end: j['end'] == null ? null : ms('end', Duration.zero),
       fadeIn: ms('fin', legacy),
       fadeOut: ms('fout', legacy),
       duck: j['duck'] as bool? ?? true,

@@ -49,3 +49,12 @@ Future<String?> extractAudio(String path) async {
       await _run(
           ['-y', '-i', path, '-vn', '-map', '0:a:0', '-c:a', 'aac', '-b:a', '192k', out], out);
 }
+
+Future<String?> cutAudio(String path, Duration start, Duration? length) async {
+  final out = '${(await getTemporaryDirectory()).path}/'
+      'loop_${DateTime.now().millisecondsSinceEpoch}.wav';
+  return _run([
+    '-y', '-ss', _s(start), if (length != null) ...['-t', _s(length)], '-i', path,
+    '-vn', '-c:a', 'pcm_s16le', '-ar', '44100', '-ac', '2', out,
+  ], out);
+}

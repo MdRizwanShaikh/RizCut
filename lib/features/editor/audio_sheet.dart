@@ -90,13 +90,18 @@ class _AudioSheetState extends State<AudioSheet> {
       return;
     }
     await c.setVolume(m.volume.clamp(0.0, 1.0));
-    await c.seekTo(m.offset);
-    await c.play();
     setState(() => _previewing = true);
-    _previewStop = Timer(const Duration(seconds: 8), () {
-      c.pause();
-      if (mounted) setState(() => _previewing = false);
-    });
+    _loopPreview();
+  }
+
+  /// Plays the selected part on repeat, like the video will.
+  void _loopPreview() {
+    final c = _song, m = _music;
+    if (c == null || m == null || !_previewing) return;
+    c.seekTo(m.offset);
+    c.play();
+    _previewStop?.cancel();
+    _previewStop = Timer(m.loopEnd(_songLength) - m.offset, _loopPreview);
   }
 
   void _setMusic(MusicTrack? m) {
@@ -288,64 +293,72 @@ class _AudioSheetState extends State<AudioSheet> {
                   ),
                 ],
               ),
-              // Start point in the song.
+              // The part of the song that plays (and loops).
               Row(
                 children: [
                   IconButton(
                     key: const Key('music-preview'),
-                    tooltip: _previewing ? 'Stop' : 'Listen from here',
+                    tooltip: _previewing ? 'Stop' : 'Listen to the selected part',
                     onPressed: _song == null ? null : _togglePreview,
                     icon: Icon(_previewing ? Icons.stop_circle : Icons.play_circle,
                         color: RizColors.cyan, size: 30),
                   ),
-                  const Text('Start at'),
-                  Expanded(
-                    child: Slider(
-                      key: const Key('music-offset'),
-                      value: _songLength > const Duration(seconds: 1)
-                          ? m.offset.inMilliseconds
-                              .clamp(0, _songLength.inMilliseconds - 1000)
-                              .toDouble()
-                          : 0,
-                      max: _songLength > const Duration(seconds: 1)
-                          ? (_songLength.inMilliseconds - 1000).toDouble()
-                          : 1,
-                      onChanged: _songLength > const Duration(seconds: 1)
-                          ? (v) => setState(() => _music =
-                              m.copyWith(offset: Duration(milliseconds: v.round())))
-                          : null,
-                      onChangeEnd: (_) {
-                        if (_previewing) {
-                          _previewing = false;
-                          _togglePreview();
-                        }
-                      },
-                    ),
+                  const Expanded(child: Text('Music part')),
+                  Text(
+                    _songLength == Duration.zero
+                        ? ''
+                        : '${_fmt(m.offset)} – ${_fmt(m.loopEnd(_songLength))}'
+                            ' · ${(m.loopEnd(_songLength) - m.offset).inSeconds}s loop',
+                    style: const TextStyle(color: RizColors.textDim, fontSize: 12),
                   ),
-                  SizedBox(
-                    width: 76,
-                    child: Text(
-                      _songLength == Duration.zero
-                          ? _fmt(m.offset)
-                          : '${_fmt(m.offset)} / ${_fmt(_songLength)}',
-                      textAlign: TextAlign.end,
-                      style: const TextStyle(color: RizColors.textDim, fontSize: 12),
-                    ),
-                  ),
+                  const SizedBox(width: 4),
                 ],
               ),
               if (_songPeaks != null && _songLength > Duration.zero)
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+                  padding: const EdgeInsets.fromLTRB(24, 2, 24, 0),
                   child: SizedBox(
                     height: 34,
                     child: CustomPaint(
                       painter: _SongWavePainter(
                         _songPeaks!,
                         m.offset.inMicroseconds / _songLength.inMicroseconds,
+                        m.loopEnd(_songLength).inMicroseconds / _songLength.inMicroseconds,
                       ),
                     ),
                   ),
+                ),
+              if (_songLength > MusicTrack.minLoop)
+                RangeSlider(
+                  key: const Key('music-range'),
+                  values: RangeValues(
+                    m.offset.inMilliseconds.toDouble(),
+                    m.loopEnd(_songLength).inMilliseconds.toDouble(),
+                  ),
+                  max: _songLength.inMilliseconds.toDouble(),
+                  onChanged: (r) {
+                    final start = Duration(milliseconds: r.start.round());
+                    var end = Duration(milliseconds: r.end.round());
+                    if (end - start < MusicTrack.minLoop) {
+                      // Keep at least a second; move whichever thumb is dragged.
+                      if (start != m.offset) {
+                        return;
+                      }
+                      end = start + MusicTrack.minLoop;
+                    }
+                    setState(() => _music = end >= _songLength
+                        ? m.copyWith(offset: start, clearEnd: true)
+                        : m.copyWith(offset: start, end: end));
+                  },
+                  onChangeEnd: (_) {
+                    if (_previewing) _loopPreview();
+                  },
+                ),
+              if (_songLength > MusicTrack.minLoop)
+                const Padding(
+                  padding: EdgeInsets.only(left: 12, bottom: 4),
+                  child: Text('Only this part plays, and repeats to fill the video.',
+                      style: TextStyle(color: RizColors.textDim, fontSize: 12)),
                 ),
               _fadeRow('Fade in', m.fadeIn,
                   (v) => setState(() => _music = m.copyWith(fadeIn: v))),
@@ -358,10 +371,6 @@ class _AudioSheetState extends State<AudioSheet> {
                 value: m.duck,
                 activeThumbColor: RizColors.magenta,
                 onChanged: (v) => setState(() => _music = m.copyWith(duck: v)),
-              ),
-              const Text(
-                'Music loops to fit the video length.',
-                style: TextStyle(color: RizColors.textDim, fontSize: 12),
               ),
             ],
             const SizedBox(height: 16),
@@ -383,11 +392,11 @@ class _AudioSheetState extends State<AudioSheet> {
   }
 }
 
-/// The whole song's waveform; the part before the start point is dimmed.
+/// The whole song's waveform; the parts outside the selection are dimmed.
 class _SongWavePainter extends CustomPainter {
-  _SongWavePainter(this.peaks, this.start);
+  _SongWavePainter(this.peaks, this.start, this.end);
   final List<double> peaks;
-  final double start;
+  final double start, end;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -411,10 +420,10 @@ class _SongWavePainter extends CustomPainter {
       }
       final h = (mx * size.height).clamp(1.0, size.height) / 2;
       final x = i * 3 + 1.5;
-      canvas.drawLine(Offset(x, mid - h), Offset(x, mid + h), i / bars < start ? off : on);
+      canvas.drawLine(Offset(x, mid - h), Offset(x, mid + h), (i / bars < start || i / bars >= end) ? off : on);
     }
   }
 
   @override
-  bool shouldRepaint(_SongWavePainter old) => old.peaks != peaks || old.start != start;
+  bool shouldRepaint(_SongWavePainter old) => old.peaks != peaks || old.start != start || old.end != end;
 }

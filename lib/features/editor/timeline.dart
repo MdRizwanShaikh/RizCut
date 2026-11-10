@@ -511,7 +511,7 @@ class _MusicWavePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_MusicWavePainter old) =>
-      old.peaks != peaks || old.duration != duration || old.track.offset != track.offset;
+      old.peaks != peaks || old.duration != duration || !identical(old.track, track);
 }
 
 class _LayerBar extends StatelessWidget {

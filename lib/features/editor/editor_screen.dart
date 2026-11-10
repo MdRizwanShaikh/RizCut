@@ -95,6 +95,7 @@ class _EditorScreenState extends State<EditorScreen> {
   VideoPlayerController? _music;
   String? _musicLoc;
   double _musicVolume = -1;
+  Timer? _musicLoopTimer;
   Project? _project;
   final _undo = <Project>[];
   final _redo = <Project>[];
@@ -308,6 +309,7 @@ class _EditorScreenState extends State<EditorScreen> {
     for (final c in _audioPlayers.values) {
       c.dispose();
     }
+    _musicLoopTimer?.cancel();
     _music?.dispose();
     applyWebVideoFilter(null);
     super.dispose();
@@ -403,6 +405,7 @@ class _EditorScreenState extends State<EditorScreen> {
       return;
     }
     final old = _music;
+    _musicLoopTimer?.cancel();
     _music = null;
     _musicLoc = track?.location;
     await old?.dispose();
@@ -414,7 +417,6 @@ class _EditorScreenState extends State<EditorScreen> {
               : VideoSource.file(track.location))
           .createController();
       await ctrl.initialize();
-      await ctrl.setLooping(true);
       if (!mounted || _musicLoc != track.location) {
         await ctrl.dispose();
         return;
@@ -451,16 +453,44 @@ class _EditorScreenState extends State<EditorScreen> {
     if (len <= Duration.zero) return;
     final want = track.positionAt(_t, len);
     final diff = (m.value.position - want).inMilliseconds.abs();
+    final loop = (track.loopEnd(len) - track.offset).inMilliseconds;
     // Ignore the wrap-around at the loop point.
-    if (diff > 700 && diff < len.inMilliseconds - 700) m.seekTo(want);
+    if (diff > 700 && diff < loop - 700) {
+      m.seekTo(want);
+      _armMusicLoop(track.loopEnd(len) - want);
+    }
+  }
+
+  /// Only the selected part of the song plays: jump back to its start when
+  /// it ends. A timer, because the player reports its position only every
+  /// half second or so.
+  void _armMusicLoop(Duration left) {
+    _musicLoopTimer?.cancel();
+    final m = _music, track = _project?.music;
+    if (!_playing || m == null || track == null) return;
+    final len = m.value.duration;
+    if (len <= Duration.zero) return;
+    _musicLoopTimer = Timer(left < Duration.zero ? Duration.zero : left, () {
+      if (!mounted || !_playing || _music != m) return;
+      m.seekTo(track.offset);
+      m.play();
+      _armMusicLoop(track.loopEnd(len) - track.offset);
+    });
   }
 
   void _syncMusicPosition({required bool play}) {
     final m = _music;
     if (m == null || !m.value.isInitialized) return;
     final track = p.music;
-    if (track != null && m.value.duration > Duration.zero) {
-      m.seekTo(track.positionAt(_t, m.value.duration));
+    final len = m.value.duration;
+    if (track != null && len > Duration.zero) {
+      final want = track.positionAt(_t, len);
+      m.seekTo(want);
+      if (play) {
+        _armMusicLoop(track.loopEnd(len) - want);
+      } else {
+        _musicLoopTimer?.cancel();
+      }
     }
     play ? m.play() : m.pause();
   }
@@ -669,6 +699,7 @@ class _EditorScreenState extends State<EditorScreen> {
       c.pause();
     }
     _photoTimer?.cancel();
+    _musicLoopTimer?.cancel();
     _music?.pause();
     setState(() => _playing = false);
   }

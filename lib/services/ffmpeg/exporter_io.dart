@@ -14,6 +14,7 @@ import 'package:share_plus/share_plus.dart';
 import '../../features/editor/overlay_style.dart';
 import '../../features/editor/project.dart';
 import 'export_command.dart';
+import 'media_tools.dart';
 import 'project_exporter.dart';
 
 ProjectExporter createExporter() => _FfmpegExporter();
@@ -91,12 +92,21 @@ class _FfmpegExporter implements ProjectExporter {
     }
 
     final track = project.music;
+    // Only the selected part of the song loops: cut it to its own file.
+    var musicPath = track?.location;
+    if (track != null && !track.isUrl && (track.offset > Duration.zero || track.end != null)) {
+      final cut = await MediaTools.cutAudio(
+          track.location, track.offset, track.end == null ? null : track.end! - track.offset);
+      if (cut != null) {
+        temp.add(File(cut));
+        musicPath = cut;
+      }
+    }
     final music = track == null || track.isUrl
         ? null
         : MusicInput(
-            path: track.location,
+            path: musicPath!,
             volume: track.volume,
-            offset: track.offset,
             fadeIn: track.fadeIn,
             fadeOut: track.fadeOut,
             duck: track.duck,

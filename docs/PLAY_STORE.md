@@ -154,7 +154,8 @@ STYLE
 
 SOUND
 • Add music from your phone or use the sound from any video
-• Pick where the song starts, set volume and fade in/out length
+• Pick the part of the song you want — it loops to fill the video
+• Set music volume and fade in/out length
 • Music lowers itself automatically under your voiceover
 • Record a voiceover while the video plays
 • Built-in sound effects: whoosh, pop, ding, click, boom, rise

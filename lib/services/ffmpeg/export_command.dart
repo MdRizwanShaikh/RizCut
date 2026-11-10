@@ -217,7 +217,6 @@ class MusicInput {
   const MusicInput({
     required this.path,
     this.volume = 0.8,
-    this.offset = Duration.zero,
     this.fadeIn = const Duration(milliseconds: 1500),
     this.fadeOut = const Duration(milliseconds: 1500),
     this.duck = false,
@@ -225,8 +224,8 @@ class MusicInput {
   final String path;
   final double volume;
 
-  /// Start point in the song (first pass; loops restart at 0).
-  final Duration offset;
+  /// The file is looped whole: the exporter first cuts the selected part
+  /// of the song to its own file.
   final Duration fadeIn, fadeOut;
 
   /// Lower the music to [MusicTrack.duckLevel] under voiceovers.
@@ -680,10 +679,7 @@ List<String> buildProjectExportArgs({
     '-y',
     ...inputs,
     ...overlayInputs,
-    if (music != null) ...[
-      if (music.offset > Duration.zero) ...['-ss', ffmpegSeconds(music.offset)],
-      '-stream_loop', '-1', '-i', music.path,
-    ],
+    if (music != null) ...['-stream_loop', '-1', '-i', music.path],
     ...audioInputs,
     '-filter_complex', graph.join(';'),
     '-map', '[$last]',

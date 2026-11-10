@@ -30,6 +30,7 @@ void main() {
       name: 'Song',
       volume: 0.5,
       offset: Duration(seconds: 42),
+      end: Duration(seconds: 60),
       fadeIn: Duration(seconds: 3),
       fadeOut: Duration.zero,
       duck: false,
@@ -51,28 +52,49 @@ void main() {
     expect(off.fadeOut, Duration.zero);
   });
 
-  test('song position: first pass from the offset, then loops from 0', () {
-    const m = MusicTrack(location: 'x', isUrl: false, offset: Duration(seconds: 20));
+  test('song position: only the selected part, repeated', () {
     const len = Duration(seconds: 30);
-    expect(m.positionAt(Duration.zero, len), const Duration(seconds: 20));
-    expect(m.positionAt(const Duration(seconds: 9), len), const Duration(seconds: 29));
-    expect(m.positionAt(const Duration(seconds: 10), len), Duration.zero);
-    expect(m.positionAt(const Duration(seconds: 45), len), const Duration(seconds: 5));
+    const part = MusicTrack(
+        location: 'x', isUrl: false, offset: Duration(seconds: 10), end: Duration(seconds: 15));
+    expect(part.positionAt(Duration.zero, len), const Duration(seconds: 10));
+    expect(part.positionAt(const Duration(seconds: 4), len), const Duration(seconds: 14));
+    expect(part.positionAt(const Duration(seconds: 5), len), const Duration(seconds: 10));
+    expect(part.positionAt(const Duration(seconds: 12), len), const Duration(seconds: 12));
+    // No end: from the start point to the end of the song, then again.
+    const tail = MusicTrack(location: 'x', isUrl: false, offset: Duration(seconds: 20));
+    expect(tail.positionAt(const Duration(seconds: 9), len), const Duration(seconds: 29));
+    expect(tail.positionAt(const Duration(seconds: 10), len), const Duration(seconds: 20));
     const plain = MusicTrack(location: 'x', isUrl: false);
     expect(plain.positionAt(const Duration(seconds: 65), len), const Duration(seconds: 5));
+    // Too short a part is widened to a second; an end past the song is cut.
+    const tiny = MusicTrack(
+        location: 'x', isUrl: false, offset: Duration(seconds: 3), end: Duration(seconds: 3));
+    expect(tiny.loopEnd(len), const Duration(seconds: 4));
+    const past = MusicTrack(location: 'x', isUrl: false, end: Duration(seconds: 99));
+    expect(past.loopEnd(len), len);
   });
 
-  test('export: offset seeks the looping input, fade lengths, no fade at 0', () {
+  test('selected part survives json; no end stays null', () {
+    const m = MusicTrack(
+        location: 'x', isUrl: false, offset: Duration(seconds: 2), end: Duration(seconds: 9));
+    expect(MusicTrack.fromJson(m.toJson()).end, const Duration(seconds: 9));
+    const n = MusicTrack(location: 'x', isUrl: false);
+    expect(n.toJson().containsKey('end'), isFalse);
+    expect(MusicTrack.fromJson(n.toJson()).end, isNull);
+    expect(m.copyWith(clearEnd: true).end, isNull);
+  });
+
+  test('export: music file loops whole, fade lengths, no fade at 0', () {
     final args = _build(
       const Project(clips: _clips),
       const MusicInput(
-        path: '/s.mp3',
-        offset: Duration(seconds: 12),
+        path: '/part.wav',
         fadeIn: Duration(seconds: 2),
         fadeOut: Duration.zero,
       ),
     );
-    expect(args, containsAllInOrder(['-ss', '12.000', '-stream_loop', '-1', '-i', '/s.mp3']));
+    final i = args.indexOf('/part.wav');
+    expect(args.sublist(i - 3, i + 1), ['-stream_loop', '-1', '-i', '/part.wav']);
     final g = _graph(args);
     expect(g, contains('afade=t=in:st=0:d=2.000'));
     expect(g, isNot(contains('afade=t=out')));
