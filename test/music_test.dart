@@ -1,6 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rizcut/features/editor/audio_track.dart';
-import 'package:rizcut/features/editor/media.dart';
 import 'package:rizcut/features/editor/project.dart';
 import 'package:rizcut/services/ffmpeg/export_command.dart';
 
